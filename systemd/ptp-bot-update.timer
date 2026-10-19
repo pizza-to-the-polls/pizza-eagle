@@ -1,0 +1,11 @@
+[Unit]
+Description=ptp-bot nightly update (git pull --ff-only + rebuild + restart)
+Conflicts=ptp-bot-update.service before-reboot
+
+[Timer]
+OnCalendar=*-*-* 04:30:00
+Persistent=true
+Unit=ptp-bot-update.service
+
+[Install]
+WantedBy=timers.target

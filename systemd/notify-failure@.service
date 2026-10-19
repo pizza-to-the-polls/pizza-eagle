@@ -1,0 +1,9 @@
+[Unit]
+Description=ptp-bot unit failure notifier (%i)
+
+[Service]
+Type=oneshot
+# SLACK_ALERT_WEBHOOK comes from the same Secrets Manager env file.
+# Kept as a template unit so OnFailure=notify-failure@%n.service resolves.
+ExecStart=/opt/ptp-bot/scripts/notify-failure.sh %i
+EnvironmentFile=/opt/ptp-bot/.env
