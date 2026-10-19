@@ -21,6 +21,7 @@ src/config.ts        env parsing
 agent/AGENTS.md      operator context (copied into each case workdir)
 systemd/             ptp-bot.service + nightly update timer + failure notifier
 scripts/bootstrap.sh cloud-init user-data (idempotent, EIP+DNS self-registration)
+manifest.json         Slack app manifest (name, bot user, scopes, Socket Mode)
 cloudformation/      ptp-ops.yaml — DRAFT stack (review TODOs before deploy)
 ```
 
@@ -43,12 +44,18 @@ investigation transcript store; back it up with the box.
 
 ### One-time Slack app setup (~10 min)
 
-1. <https://api.slack.com/apps> → **Create App → From scratch** → name it `ptp-bot (dev)`.
-2. **Socket Mode** → enable → **Add app-level token** with scope `connections:write` → copy the `xapp-…`.
-3. **OAuth & Permissions** → Bot Token Scopes: `app_mentions:read`, `chat:write` → **Install to Workspace** → copy the `xoxb-…`.
-4. **Event Subscriptions** → enable → **Subscribe to bot events** → add `app_mention` → Save. (With Socket Mode on, no request URL is needed.)
+The app config lives in **`manifest.json`** (name, bot user, scopes, Socket Mode) — create the app *from* it rather than clicking through settings:
+
+1. <https://api.slack.com/apps> → **Create New App → From an app manifest** → paste `manifest.json` (the dashboard validates it on paste).
+2. **App-Level Tokens** (*Basic Information* → scroll down) → **Generate token and scopes** → add scope `connections:write` → copy the `xapp-…` — *app tokens aren't representable in the manifest schema*.
+3. **Event Subscriptions** → enable → **Subscribe to bot events** → add `app_mention` → Save. No request URL (Socket Mode is already on via the manifest); *the subscribed-event list isn't part of the manifest schema either*.
+4. **OAuth & Permissions** → **Install to Workspace** → copy the bot token (`xoxb-…`).
 5. Create a private test channel (e.g. `#bot-lab`), copy its ID from channel **details** (starts with `C`), and `/invite` the app into it.
 6. Copy your own member ID (profile → ⋮ → **Copy member ID**, starts with `U`).
+
+**Slack CLI** (optional; installed here as `slack-cli` v4.10.0): official installer is
+`curl -fsSL https://downloads.slack-edge.com/slack-cli/install.sh | bash -s slack-cli`.
+`slack-cli manifest validate` only works inside a CLI project (`.slack/hooks.json`) — for this repo the dashboard's paste-validation is the check. Useful anyway: `slack-cli login` (workspace auth), `slack-cli doctor` (why-is-it-silent diagnostics), `slack-cli manifest diff` (dashboard vs repo drift, if this ever becomes a CLI project).
 
 ### Configure and pre-flight
 

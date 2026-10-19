@@ -1,0 +1,24 @@
+{
+  "display_information": {
+    "name": "ptp-bot",
+    "description": "PTP ops investigator. @mention it with an ops question — it investigates read-only (DB, logs, Bugsnag) and posts findings to the thread.",
+    "background_color": "#cc5a22"
+  },
+  "features": {
+    "bot_user": {
+      "display_name": "ptp-bot",
+      "always_online": true
+    }
+  },
+  "oauth_config": {
+    "scopes": {
+      "bot": [
+        "app_mentions:read",
+        "chat:write"
+      ]
+    }
+  },
+  "settings": {
+    "socket_mode_enabled": true
+  }
+}
