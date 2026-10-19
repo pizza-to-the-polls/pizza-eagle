@@ -39,30 +39,70 @@ cloudformation/      ptp-ops.yaml — DRAFT stack (review TODOs before deploy)
 Sessions and case files live under `state/` (JSONL + markdown) — that's the
 investigation transcript store; back it up with the box.
 
-## Local development
+## Interfacing from a test channel
+
+### One-time Slack app setup (~10 min)
+
+1. <https://api.slack.com/apps> → **Create App → From scratch** → name it `ptp-bot (dev)`.
+2. **Socket Mode** → enable → **Add app-level token** with scope `connections:write` → copy the `xapp-…`.
+3. **OAuth & Permissions** → Bot Token Scopes: `app_mentions:read`, `chat:write` → **Install to Workspace** → copy the `xoxb-…`.
+4. **Event Subscriptions** → enable → **Subscribe to bot events** → add `app_mention` → Save. (With Socket Mode on, no request URL is needed.)
+5. Create a private test channel (e.g. `#bot-lab`), copy its ID from channel **details** (starts with `C`), and `/invite` the app into it.
+6. Copy your own member ID (profile → ⋮ → **Copy member ID**, starts with `U`).
+
+### Configure and pre-flight
 
 ```bash
-npm install
-export SLACK_APP_TOKEN=xapp-…      # app token (Socket Mode)
-export SLACK_BOT_TOKEN=xoxb-…       # bot token
-export ALLOWED_CHANNELS=C…         # your private test channel
-npm run dev
+cp .env.example .env   # fill in: both tokens, ALLOWED_CHANNELS=C…, ALLOWED_USERS=U…
+npm run check:slack    # validates: bot token, socket connect, channel invite, user ID format
 ```
 
-Create the Slack app (one-time):
+`check:slack` catches the classic failures before you start the listener — bad token type, `not_in_channel` (you forgot to invite the app), missing scope, malformed IDs.
 
-1. <https://api.slack.com/apps> → **Create App → From scratch**.
-2. **Socket Mode** → enable → create app-level token (`connections:write`).
-3. **OAuth & Permissions** → bot scopes: `app_mentions:read`, `chat:write`.
-4. **Event Subscriptions** → enable → subscribe to `app_mention`.
-5. Install to workspace → copy the bot token (`xoxb-`).
-6. Invite the bot to your test channel.
+### Run it
 
-Then @-mention it with the Spring Creek question and watch it go.
+```bash
+npm run dev             # listener — console shows "[ptp-bot] up …" on connect
+```
 
-`PI_BIN` defaults to `pi` on PATH. On the ops box the bot runs as the
-`ptp-bot` user whose `~/.pi` carries the skills; locally your own
-`~/.pi/agent/skills` already work.
+No public URL is needed (Socket Mode is outbound wss) — this runs fine on a laptop.
+
+### Talking to it
+
+In the test channel:
+
+```
+@ptp-bot why does upload 13280 have no report?
+```
+
+What happens, in order:
+
+1. **Instant status reply** in the thread: `🔎 Investigating — … (case <id>, question #1)` — that's the ack.
+2. The investigation runs **async** (minutes, not seconds). Watch the `npm run dev` console for `[ptp-bot]` logs.
+3. Findings post **as threaded replies** (long answers split at ~3800 chars), status message flips to ✅ (or ❌ with the error tail).
+
+**Follow-ups must be *in the same thread*** — a reply that @-mentions the bot again resumes the same pi session (same case). A fresh top-level @mention starts a new case. That's the whole mental model: one thread = one case.
+
+### Slack-free interface (agent quality testing)
+
+`ask` runs the exact same investigation path (AGENTS.md context, case history, session resume) without Slack — good for tuning the operator prompt before wiring a workspace:
+
+```bash
+npm run ask -- "why does upload 13280 have no report?"
+npm run ask -- --session <id> "follow-up"   # resume a case; ids print under each answer
+```
+
+### Troubleshooting
+
+| Symptom | Cause → fix |
+|---|---|
+| Nothing fires, no logs | App config: Event Subscriptions off, or `app_mention` not subscribed → step 4 |
+| `not_in_channel` on check or silent ignoring | Bot not invited → `/invite` the app in the test channel |
+| Mention ignored, console shows "un-allowlisted channel/user" | `ALLOWED_CHANNELS`/`ALLOWED_USERS` in `.env` are stale → re-copy IDs |
+| `Missing required env var` | No `.env` and no shell exports → fill `.env` (listener reads it, shell env wins) |
+| Reply never comes, case stuck | Check `state/work/<case>/case-history.md` + `journalctl -u ptp-bot` (or dev console) — timeout default 10 min |
+
+`PI_BIN` defaults to `pi` on PATH. Locally your own `~/.pi/agent/skills` work as-is; on the ops box the bot runs as the `ptp-bot` user whose `~/.pi` carries the synced skills.
 
 ## Deploy (ops box)
 

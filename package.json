@@ -12,6 +12,8 @@
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
     "smoke": "tsx scripts/smoke.ts",
+    "ask": "tsx scripts/ask.ts",
+    "check:slack": "tsx scripts/check-slack.ts",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js"
   },

@@ -7,7 +7,7 @@
  * (`pi --session-id <id>` creates if missing), so context carries.
  */
 
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 export interface ThreadRecord {
@@ -27,7 +27,14 @@ export class ThreadStore {
   constructor(file: string) {
     this.file = file;
     if (existsSync(file)) {
-      this.data = JSON.parse(readFileSync(file, "utf8"));
+      try {
+        this.data = JSON.parse(readFileSync(file, "utf8"));
+      } catch (e) {
+        // A corrupt threads.json shouldn't take the listener down — start
+        // fresh; the pi session files under state/work still carry context.
+        console.warn(`[ptp-bot] ${file} unreadable (${(e as Error).message}) — starting empty`);
+        this.data = {};
+      }
     } else {
       this.data = {};
     }

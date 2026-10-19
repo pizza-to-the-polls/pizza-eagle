@@ -53,16 +53,21 @@ async function main(): Promise<void> {
   let shuttingDown = false;
 
   const socket = new SocketModeClient({ appToken: cfg.slackAppToken });
-  socket.on("app_mention", async ({ body }) => {
-    if (body.event instanceof Object && "ts" in body.event) {
-      const event = body.event as MentionEvent;
-      if (event.bot_id) return; // skip our own messages / other bots
-      try {
-        await handle(event);
-      } catch (e) {
-        console.error("[ptp-bot] handler error:", e);
-      }
-      await body.ack();
+
+  socket.on("app_mention", async ({ body, ack }) => {
+    // Ack FIRST — Slack redelivers unacked events, and our handler does
+    // network work (status post) before the actual investigation runs.
+    try {
+      await ack?.();
+    } catch (e) {
+      console.error("[ptp-bot] ack failed:", e);
+    }
+    const event = (body as { event?: MentionEvent })?.event;
+    if (!event || event.bot_id) return; // no payload, or bot-sourced mention
+    try {
+      await handle(event);
+    } catch (e) {
+      console.error("[ptp-bot] handler error:", e);
     }
   });
 
@@ -145,6 +150,14 @@ async function main(): Promise<void> {
   };
   process.on("SIGTERM", shutdown);
   process.on("SIGINT", shutdown);
+
+  const slackClientForAuthCheck = new WebClient(cfg.slackBotToken);
+  try {
+    const me = await slackClientForAuthCheck.auth.test();
+    console.log(`[ptp-bot] token ok — bot: @${me.user as string} (${me.user_id}) team: ${me.team as string}`);
+  } catch (e) {
+    console.warn(`[ptp-bot] bot token failed auth.test: ${(e as Error).message}`);
+  }
 
   await socket.start();
   console.log(

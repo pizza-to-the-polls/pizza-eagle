@@ -12,7 +12,8 @@ const MAX_CHUNK = 3800; // Slack posts cap at ~4000 chars with formatting
 
 export function stripMention(text: string): string {
   // "<@U12345> why is upload 13280 orphaned?" -> "why is upload 13280 orphaned?"
-  return text.replace(/^\s*<@[A-Z0-9]+>\s*/u, "").trim();
+  // IDs can contain digits + letters; tolerate a trailing colon/label forms.
+  return text.replace(/^\s*<@[A-Za-z0-9]+>\s*:?(?=\s|$)/, "").trim();
 }
 
 export async function postStatus(

@@ -1,8 +1,11 @@
 /**
- * Environment config. All values may be overridden via env vars —
- * see .env.example. On the ops box these come from the systemd unit's
- * EnvironmentFile, which bootstrap.sh populates from Secrets Manager.
+ * Environment config. All values may be overridden via env vars or a local
+ * `.env` file — see .env.example. On the ops box these come from the systemd
+ * unit's EnvironmentFile (which bootstrap.sh populates from Secrets Manager);
+ * locally, from .env / your shell.
  */
+
+import { readFileSync } from "node:fs";
 
 export interface Config {
   /** Slack app-level token (xapp-...) for Socket Mode */
@@ -38,9 +41,45 @@ function requireValue(name: string, env: NodeJS.ProcessEnv): string {
   return v;
 }
 
+/**
+ * Load a local .env file (KEY=VALUE lines). Values already set in the real
+ * environment win — the file only fills gaps, so shell exports and the
+ * systemd EnvironmentFile always take precedence.
+ */
+export function loadEnvFile(path: string): Record<string, string> {
+  try {
+    const raw = readFileSync(path, "utf8");
+    const out: Record<string, string> = {};
+    for (const line of raw.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eq = trimmed.indexOf("=");
+      if (eq < 0) continue;
+      const key = trimmed.slice(0, eq).trim();
+      let value = trimmed.slice(eq + 1).trim();
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1);
+      }
+      out[key] = value;
+    }
+    return out;
+  } catch {
+    return {}; // no .env, or unreadable — fine, env-only mode
+  }
+}
+
+/** Merge .env under the real environment (real env wins). */
+export function mergedEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return { ...loadEnvFile(".env"), ...env };
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  const slackAppToken = requireValue("SLACK_APP_TOKEN", env);
-  const slackBotToken = requireValue("SLACK_BOT_TOKEN", env);
+  const e = mergedEnv(env);
+  const slackAppToken = requireValue("SLACK_APP_TOKEN", e);
+  const slackBotToken = requireValue("SLACK_BOT_TOKEN", e);
   if (!slackAppToken.startsWith("xapp-")) {
     throw new Error("SLACK_APP_TOKEN must be an app token (xapp-...)");
   }
@@ -50,12 +89,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   return {
     slackAppToken,
     slackBotToken,
-    allowedChannels: new Set(csv("ALLOWED_CHANNELS", env)),
-    allowedUsers: new Set(csv("ALLOWED_USERS", env)),
-    piBin: env.PI_BIN ?? "pi",
-    stateDir: env.BOT_STATE_DIR ?? "./state",
-    agentDir: env.AGENT_DIR ?? "../agent",
-    timeoutMs: Number(env.INVESTIGATE_TIMEOUT_MS ?? 10 * 60_000),
-    maxConcurrent: Math.max(1, Number(env.MAX_CONCURRENT ?? 2)),
+    allowedChannels: new Set(csv("ALLOWED_CHANNELS", e)),
+    allowedUsers: new Set(csv("ALLOWED_USERS", e)),
+    piBin: e.PI_BIN ?? "pi",
+    stateDir: e.BOT_STATE_DIR ?? "./state",
+    // repo-relative default: agent/ inside this repo (works from repo root
+    // locally and from WorkingDirectory=/opt/ptp-bot on the box)
+    agentDir: e.AGENT_DIR ?? "./agent",
+    timeoutMs: Number(e.INVESTIGATE_TIMEOUT_MS ?? 10 * 60_000),
+    maxConcurrent: Math.max(1, Number(e.MAX_CONCURRENT ?? 2)),
   };
 }
