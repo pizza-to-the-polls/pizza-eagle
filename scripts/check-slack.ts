@@ -35,19 +35,21 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // 2. Socket Mode / app token — connect, wait for hello, disconnect
+  // 2. Socket Mode / app token — connect, wait for the connect event, disconnect
   try {
     const socket = new SocketModeClient({ appToken: cfg.slackAppToken });
+    // socket-mode v2 emits "connected" (v1 emitted "hello") — accept both.
     const hello = new Promise<boolean>((resolve) => {
+      socket.on("connected", () => resolve(true));
       socket.on("hello", () => resolve(true));
       setTimeout(() => resolve(false), 10_000);
     });
     await socket.start();
     const connected = await hello;
     void socket.disconnect();
-    ok("app token (Socket Mode hello)", connected);
+    ok("app token (Socket Mode connected)", connected);
   } catch (e) {
-    ok("app token (Socket Mode hello)", false, (e as Error).message);
+    ok("app token (Socket Mode connected)", false, (e as Error).message);
     process.exit(1);
   }
 
