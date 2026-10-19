@@ -3,7 +3,7 @@
 **Status: scaffolded (2026-10-19) — compiles, not yet deployed.**
 
 Slack front-end around a **pi agent session** for Pizza to the Polls ops
-investigations. `@ptp-bot why does upload 13280 have no report?` →
+investigations. `@Pizza Eagle why does upload 13280 have no report?` →
 ack in the thread → `pi` subprocess investigates with the same read-only
 tooling used manually today (RDS Data API as `ptp_ro`, CloudWatch Logs,
 Bugsnag readonly, `gh`) → findings posted back to the thread.
@@ -28,7 +28,7 @@ cloudformation/      ptp-ops.yaml — DRAFT stack (review TODOs before deploy)
 ## How a mention flows
 
 ```
-@ptp-bot <question>
+@Pizza Eagle <question>
   → allowlist check (channels, users)
   → post "🔎 Investigating…" to thread          (instant ack)
   → queue job → pi --print --session-id <thread-session> "<question>"
@@ -79,7 +79,7 @@ No public URL is needed (Socket Mode is outbound wss) — this runs fine on a la
 In the test channel:
 
 ```
-@ptp-bot why does upload 13280 have no report?
+@Pizza Eagle why does upload 13280 have no report?
 ```
 
 What happens, in order:
