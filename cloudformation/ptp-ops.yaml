@@ -11,11 +11,6 @@ Parameters:
   InstanceType:
     Type: String
     Default: t4g.small
-  RetoolSshCidrs:
-    Type: String
-    Default: ""
-    Description: Comma-separated Retool Cloud egress CIDRs for port 22 (tunnel). Fetch from docs.retool.com/data-sources/reference/ip-allowlist-cloud-orgs
-    AllowedPattern: "^(|\\d+\\.\\d+\\.\\d+\\.\\d+/\\d+(,\\d+\\.\\d+\\.\\d+\\.\\d+/\\d+)*)$"
   KeyName:
     Type: String
     Default: ""
@@ -30,7 +25,11 @@ Parameters:
   DnsHostedZoneId:
     Type: String
     Description: Route53 PUBLIC hosted zone id (Retool Cloud must resolve bastion.polls.pizza over the internet)
-    Default: TODO_PUBLIC_HOSTED_ZONE_ID
+    Default: Z1C1DRRNI9HT62 # polls.pizza — verified via route53 ListHostedZones 2026-10-20
+  LatestAl2023ArmAmi:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
+    Description: SSM public parameter — CloudFormation resolves at deploy time (no IAM needed)
   BackupBucketName:
     Type: String
     Description: S3 bucket for nightly state backups (sessions/case history). Empty string disables the grant.
@@ -127,11 +126,6 @@ Resources:
                 # TODO when BackupBucketName is set: also add s3:GetObject
                 # (restore path) and versioning/bucket policy at the bucket.
 
-  DnsHostedZoneId:
-    # Output-internal parameter so the role can reference it (CFN limitation).
-    Type: String
-    Default: TODO_PUBLIC_HOSTED_ZONE_ID
-
   OpsInstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
@@ -146,24 +140,32 @@ Resources:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: ptp-ops box — egress only except Retool tunnel
-      VpcId: TODO_VPC_ID # TODO: set VPC id (or import from the pizzabase stack)
+      VpcId: TODO_VPC_ID # P1: fill from the console (VPC where Aurora lives) — ptp-agent can't ec2:DescribeVpc
       SecurityGroupEgress:
         - IpProtocol: tcp
           FromPort: 443
           ToPort: 443
           CidrIp: 0.0.0.0/0 # bot (wss), SSM, Data API, model API, gh, updates
-      SecurityGroupIngress: []
-      # Retool tunnel (port 22) is added as separate Ingress resources so
-      # the CIDR list expands cleanly — see RetoolTunnelIngress below.
-
-  # TODO: expand RetoolSshCidrs into one AWS::EC2::SecurityGroupIngress per
-  # CIDR at deploy time (or convert the parameter to a List<AWS::EC2::NetworkAclEntry...>).
+      SecurityGroupIngress:
+        # Retool tunnel (port 22). CIDRs from
+        # docs.retool.com/data-sources/reference/ip-allowlist-cloud-orgs
+        # (us-west-2 outbound), fetched 2026-10-20 — re-check when Retool
+        # changes egress (they publish a get-ip-allowlist API too).
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 35.90.103.132/30
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 44.208.168.68/30
+      # No other inbound. Humans use Session Manager (outbound 443).
 
   OpsLaunchTemplate:
     Type: AWS::EC2::LaunchTemplate
     Properties:
       LaunchTemplateData:
-        ImageId: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64 # TODO: resolve SSM param at deploy time (aws ssm get-parameters)
+        ImageId: !Ref LatestAl2023ArmAmi # SSM public param — service-resolved at deploy
         InstanceType: !Ref InstanceType
         IamInstanceProfile: { Arn: !GetAtt OpsInstanceProfile.Arn }
         SecurityGroupIds: [!GetAtt OpsSecurityGroup.GroupId]
