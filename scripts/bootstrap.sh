@@ -9,11 +9,11 @@ set -euo pipefail
 
 #### Parameters (override via /etc/ptp-ops/bootstrap.env if present)
 PTP_BOT_HOME=/opt/ptp-bot
-PTP_BOT_REPO="TODO: git clone URL for the ptp-ops repo"   # e.g. git@github.com:pizza-to-the-polls/ptp-ops.git
+PTP_BOT_REPO="https://github.com/pizza-to-the-polls/ptp-ops.git" # read-only over https on the box; updates are pull-based
 EIP_ALLOCATION_ID="TODO: eipalloc-..."                     # allocated by the CFN stack
 DNS_ZONE_ID="TODO: Route53 public hosted zone id"
 DNS_NAME="bastion.polls.pizza"
-SECRETS_PREFIX="TODO: secrets path prefix for bot tokens"  # e.g. ptp/prod/ptp-bot
+SECRETS_PREFIX="ptp/prod/ptp-ops"              # e.g. ptp/prod/ptp-ops — must match the CFN BotSecretsPrefix
 [[ -f /etc/ptp-ops/bootstrap.env ]] && . /etc/ptp-ops/bootstrap.env
 
 #### 1. Base packages
@@ -77,11 +77,16 @@ aws route53 change-resource-record-sets --hosted-zone-id "$DNS_ZONE_ID" \
   --change-batch '{"Changes":[{"Action":"UPSERT","ResourceRecordSet":{"Name":"'"$DNS_NAME"'","Type":"A","TTL":60,"ResourceRecords":[{"Value":"'"$PUBLIC_IP"'"}]}}]}'
 
 #### 9. Services
-install -m 644 "$PTP_BOT_HOME/systemd/ptp-bot.service" \
+# notify-failure@ must be present before any OnFailure= reference resolves.
+install -d /etc/systemd/system
+install -m 644 "$PTP_BOT_HOME/systemd/notify-failure@.service" \
+  "$PTP_BOT_HOME/systemd/ptp-bot.service" \
   "$PTP_BOT_HOME/systemd/ptp-bot-update.service" \
   "$PTP_BOT_HOME/systemd/ptp-bot-update.timer" \
+  "$PTP_BOT_HOME/systemd/ptp-bot-backup.service" \
+  "$PTP_BOT_HOME/systemd/ptp-bot-backup.timer" \
   /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable --now ptp-bot.service ptp-bot-update.timer
+systemctl enable --now ptp-bot.service ptp-bot-update.timer ptp-bot-backup.timer
 
 echo "ptp-ops bootstrap complete."

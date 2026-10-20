@@ -14,6 +14,7 @@
     "smoke": "tsx scripts/smoke.ts",
     "ask": "tsx scripts/ask.ts",
     "check:slack": "tsx scripts/check-slack.ts",
+    "backup": "tar czf - -C \"${BOT_STATE_DIR:-./state}\" . | aws s3 cp - \"s3://${BOT_BACKUP_BUCKET:-ptp-ops-backups}/state-$(date +%Y%m%d-%H%M).tgz\"",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js"
   },
