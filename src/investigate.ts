@@ -32,6 +32,14 @@ export class InvestigationError extends Error {
   }
 }
 
+/**
+ * In-flight investigation subprocesses, so a listener restart kills them
+ * instead of orphaning them (an orphan keeps its parent env — including stale
+ * AWS identity — and has previously self-served `aws login` into a browser
+ * prompt; see the 2026-10-20 incident).
+ */
+export const activeInvestigations = new Set<ReturnType<typeof spawn>>();
+
 export async function runInvestigation(
   cfg: Config,
   opts: { question: string; sessionId: string; workdir: string },
@@ -67,6 +75,7 @@ export async function runInvestigation(
   let stderr = "";
   child.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
   child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
+  activeInvestigations.add(child);
 
   const timedOut = await new Promise<boolean>((resolve) => {
     const killer = setTimeout(() => {
@@ -86,6 +95,7 @@ export async function runInvestigation(
   });
 
   const [code, signal] = await exitOf(child);
+  activeInvestigations.delete(child);
   const durationMs = Date.now() - started;
   const answer = stdout.trim();
 

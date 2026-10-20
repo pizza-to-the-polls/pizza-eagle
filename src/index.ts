@@ -14,7 +14,7 @@ import { randomUUID } from "node:crypto";
 import { loadConfig } from "./config.js";
 import { ThreadStore, workdirFor, type ThreadRecord } from "./store.js";
 import { editStatus, postFindings, postStatus, stripMention } from "./slack.js";
-import { InvestigationError, runInvestigation } from "./investigate.js";
+import { InvestigationError, runInvestigation, activeInvestigations } from "./investigate.js";
 
 interface MentionEvent {
   channel: string;
@@ -146,6 +146,15 @@ async function main(): Promise<void> {
   const shutdown = () => {
     shuttingDown = true;
     console.log("[ptp-bot] shutting down");
+    for (const child of activeInvestigations) {
+      // Kill in-flight investigations — do not orphan them across restarts.
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        /* already gone */
+      }
+    }
+    activeInvestigations.clear();
     void socket.disconnect();
     setTimeout(() => process.exit(0), 2_000).unref();
   };
