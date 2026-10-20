@@ -63,6 +63,7 @@ async function main(): Promise<void> {
       console.error("[ptp-bot] ack failed:", e);
     }
     const event = (body as { event?: MentionEvent })?.event;
+    console.log(`[ptp-bot] app_mention received — channel=${event?.channel ?? "?"} user=${event?.user ?? "?"} thread=${event?.thread_ts ?? "(new)"}`);
     if (!event || event.bot_id) return; // no payload, or bot-sourced mention
     try {
       await handle(event);
@@ -158,6 +159,11 @@ async function main(): Promise<void> {
   } catch (e) {
     console.warn(`[ptp-bot] bot token failed auth.test: ${(e as Error).message}`);
   }
+
+  socket.on("connecting", () => console.log("[ptp-bot] socket: connecting…"));
+  socket.on("connected", () => console.log("[ptp-bot] socket: connected"));
+  socket.on("disconnect", () => console.log("[ptp-bot] socket: DISCONNECTED"));
+  socket.on("reconnecting", () => console.log("[ptp-bot] socket: reconnecting…"));
 
   await socket.start();
   console.log(

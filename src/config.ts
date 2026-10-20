@@ -76,8 +76,21 @@ export function mergedEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessE
   return { ...loadEnvFile(".env"), ...env };
 }
 
+/**
+ * Apply .env values into process.env for keys not already set — so
+ * passthrough vars (e.g. AWS_PROFILE) reach the pi subprocess and its
+ * shell tools. Real environment always wins over the file.
+ */
+export function applyEnvFileToProcess(path = ".env"): void {
+  const file = loadEnvFile(path);
+  for (const [k, v] of Object.entries(file)) {
+    if (process.env[k] === undefined) process.env[k] = v;
+  }
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const e = mergedEnv(env);
+  applyEnvFileToProcess();
   const slackAppToken = requireValue("SLACK_APP_TOKEN", e);
   const slackBotToken = requireValue("SLACK_BOT_TOKEN", e);
   if (!slackAppToken.startsWith("xapp-")) {

@@ -13,6 +13,11 @@ thread humans read.
 
 ## Data sources available to you (use these; don't guess)
 
+- **AWS**: every `aws` command MUST run as the read-only profile —
+  `AWS_PROFILE=ptp-agent` is already set in your environment. If `aws`
+  errors with expired-session/SSO, that means the wrong (default/root)
+  identity got picked up — stop and say so instead of retrying other creds.
+
 - **RDS Data API** (read-only `ptp_ro` role via `PizzaBaseReadOnly` secret):
   ```bash
   aws rds-data execute-statement \
