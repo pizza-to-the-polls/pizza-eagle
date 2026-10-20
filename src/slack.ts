@@ -10,6 +10,32 @@ import type { WebClient } from "@slack/web-api";
 
 const MAX_CHUNK = 3800; // Slack posts cap at ~4000 chars with formatting
 
+/**
+ * Standard markdown (what pi emits) → Slack mrkdwn.
+ *
+ * Slack mrkdwn is NOT markdown: **bold** renders literally, ### headers
+ * render literally, [text](url) renders literally. Convert:
+ *   - ``` fenced blocks stay verbatim (Slack renders them)
+ *   - **bold** → *bold*  (but never inside code fences/inline code)
+ *   - ### ATX headers → *bold lines*
+ *   - - /* bullets → •
+ *   - [text](url) → <url|text>
+ * Inline `code` is untouched (same syntax in both).
+ */
+export function toSlackMrkdwn(md: string): string {
+  const parts = md.split(/(```[\s\S]*?```|`[^`\n]+`)/g); // fences + inline code verbatim
+  return parts
+    .map((part, i) => {
+      if (i % 2 === 1) return part; // inside fence/inline code — leave alone
+      return part
+        .replace(/^#{1,6}\s+(.+)$/gm, (_m, t) => `*${String(t).trim()}*`)
+        .replace(/\*\*([^*\n]+)\*\*/g, (_m, t) => `*${t}*`)
+        .replace(/\[([^\]\n]+)\]\((https?:[^)\s]+)\)/g, (_m, t, url) => `<${url}|${t}>`)
+        .replace(/^\s*[-*]\s+/gm, "• ");
+    })
+    .join("");
+}
+
 export function stripMention(text: string): string {
   // "<@U12345> why is upload 13280 orphaned?" -> "why is upload 13280 orphaned?"
   // IDs can contain digits + letters; tolerate a trailing colon/label forms.
@@ -42,8 +68,8 @@ export async function postFindings(
   threadTs: string,
   text: string,
 ): Promise<void> {
-  const trimmed = text.trim();
-  if (!trimmed) {
+  const mrkdwn = toSlackMrkdwn(text.trim());
+  if (!mrkdwn) {
     await client.chat.postMessage({
       channel,
       thread_ts: threadTs,
@@ -51,7 +77,7 @@ export async function postFindings(
     });
     return;
   }
-  for (const chunk of chunkMarkdown(trimmed, MAX_CHUNK)) {
+  for (const chunk of chunkMarkdown(mrkdwn, MAX_CHUNK)) {
     await client.chat.postMessage({ channel, thread_ts: threadTs, text: chunk });
   }
 }

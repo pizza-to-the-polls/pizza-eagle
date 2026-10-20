@@ -9,10 +9,10 @@
  */
 import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { loadConfig } from "../src/config.js";
 import { ThreadStore, workdirFor } from "../src/store.js";
-import { chunkMarkdown, stripMention } from "../src/slack.js";
+import { chunkMarkdown, stripMention, toSlackMrkdwn } from "../src/slack.js";
 import { runInvestigation } from "../src/investigate.js";
 
 let failed = 0;
@@ -22,16 +22,20 @@ const ok = (name: string, cond: boolean) => {
 };
 
 async function main(): Promise<void> {
-  // 1. config validation
+  const tmp = mkdtempSync(join(tmpdir(), "ptp-bot-smoke-"));
+  const repoRoot = process.cwd();
+
+  // 1. config validation (isolated from the repo's own .env)
+  process.chdir(tmp);
   try {
     loadConfig({});
     ok("config rejects missing tokens", false);
   } catch (e) {
     ok(`config rejects missing tokens (${(e as Error).message.split(":")[0]})`, true);
   }
+  process.chdir(repoRoot);
 
   // 2. store roundtrip
-  const tmp = mkdtempSync(join(tmpdir(), "ptp-bot-smoke-"));
   const store = new ThreadStore(join(tmp, "threads.json"));
   store.put("1234.0001", {
     sessionId: "test-session",
@@ -51,7 +55,28 @@ async function main(): Promise<void> {
     `chunking (${chunks.length} chunks, all ≤3800)`,
     chunks.every((c) => c.length <= 3800) && chunks.join("").length > 0,
   );
-  ok("short text stays single chunk", chunkMarkdown("hello", 3800).length === 1);
+  ok(
+    "short text stays single chunk",
+    chunkMarkdown("hello", 3800).length === 1,
+  );
+
+  // 3b. markdown → Slack mrkdwn conversion
+  const md = [
+    "### Findings",
+    "",
+    "- upload **13280** at `2800 E Spring Creek Pkwy`",
+    "- see [the plan](https://example.com/plan) for details",
+    "",
+    "```sql",
+    "SELECT **not bold** FROM t;",
+    "```",
+  ].join("\n");
+  const mrk = toSlackMrkdwn(md);
+  ok("headers → bold lines", /^\*Findings\*$/m.test(mrk));
+  ok("**bold** → *bold*", mrk.includes("*13280*"));
+  ok("bullets → •", mrk.includes("• upload"));
+  ok("links → <url|text>", mrk.includes("<https://example.com/plan|the plan>"));
+  ok("code fences untouched", mrk.includes("SELECT **not bold** FROM t;"));
   ok(
     "stripMention",
     stripMention("<@U0BOT123> why is upload 13280 orphaned?") === "why is upload 13280 orphaned?",
