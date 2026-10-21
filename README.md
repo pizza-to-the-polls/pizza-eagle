@@ -21,6 +21,7 @@ src/config.ts        env parsing
 agent/AGENTS.md      operator context (copied into each case workdir)
 systemd/             ptp-bot.service + nightly update timer + failure notifier
 scripts/bootstrap.sh cloud-init user-data (idempotent, EIP+DNS self-registration)
+scripts/ga.mjs       zero-dep GA4 query helper (readonly SA; report/realtime/accounts)
 manifest.json         Slack app manifest (name, bot user, scopes, Socket Mode)
 cloudformation/      ptp-ops.yaml — DRAFT stack (review TODOs before deploy)
 ```
@@ -128,7 +129,8 @@ GitHub Actions (OIDC, no AWS keys in GitHub) can trigger the same via
 
 - The `ptp-bot` OS user's only AWS identity is the instance role: logs
   read, S3 media read, `PizzaBaseReadOnly` Data API (`ptp_ro` = SELECT on
-  all 14 tables — verified), Bugsnag readonly, gh.
+  all 14 tables — verified), Bugsnag readonly, gh, GA4 readonly (aggregate
+  analytics, no PII — SA at `~/.config/ptp/ga-readonly.json`).
 - No DB write path exists for the bot. Mutating actions (filing issues,
   dispatching dd-agent) are deliberately **out of scope for v1** — that's
   the v1.5 confirmation-gate work.

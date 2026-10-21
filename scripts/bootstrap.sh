@@ -46,6 +46,14 @@ chown ptp-bot:ptp-bot "$PTP_BOT_HOME/.env"
 chmod 600 "$PTP_BOT_HOME/.env"
 rm -f /etc/ptp-ops/.env.raw
 
+#### 5b. GA service account (read-only) — investigations data source
+# scripts/ga.mjs reads this path (GA_SA_JSON default) as the ptp-bot user.
+install -d -o ptp-bot -g ptp-bot -m 700 /home/ptp-bot/.config /home/ptp-bot/.config/ptp
+aws secretsmanager get-secret-value --secret-id "${SECRETS_PREFIX}/ga-readonly" \
+  --query SecretString --output text > /home/ptp-bot/.config/ptp/ga-readonly.json
+chown ptp-bot:ptp-bot /home/ptp-bot/.config/ptp/ga-readonly.json
+chmod 600 /home/ptp-bot/.config/ptp/ga-readonly.json
+
 #### 6. Operator context + skills for the bot user
 install -d -o ptp-bot -g ptp-bot -m 755 /opt/ptp-bot/state
 install -o ptp-bot -g ptp-bot -m 644 "$PTP_BOT_HOME/agent/AGENTS.md" \

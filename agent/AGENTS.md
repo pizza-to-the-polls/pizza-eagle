@@ -31,6 +31,19 @@ thread humans read.
   `pizzabase-prod-on-mediaconvert-complete`, `pizzabase-prod-on-s3-upload-process-exif`.
 - **Bugsnag** (read-only token at `~/.config/bugsnag/readonly-token`):
   project IDs — Pizza Base `5f9af9f75d41c300135bafe2`, polls.pizza `5f973c1f258cc8000d6c9214`.
+- **Google Analytics (GA4)** — read-only service account, aggregate data, no PII.
+  Helper: `node <ptp-ops>/scripts/ga.mjs <command>` where `<ptp-ops>` is
+  `~/Projects/ptp-ops` (dev) or `/opt/ptp-bot` (ops box). Property ID comes
+  from `GA_PROPERTY_ID` in the environment (may be unset — then pass
+  `--property <id>`).
+  Commands: `accounts` (list properties), `report`, `realtime`.
+  Flags: `--dim`/`--metric` (repeatable), `--start`/`--end` (`YYYY-MM-DD | Nd | today`),
+  `--filter name=value` (comma-separated values = in-list), `--limit N`. Examples:
+  ```bash
+  node scripts/ga.mjs realtime --dim country --dim pagePath --metric activeUsers
+  node scripts/ga.mjs report --dim date --metric sessions --metric screenPageViews --start 7d
+  node scripts/ga.mjs report --dim pagePath --metric screenPageViews --filter pagePath=/donate --start 30d --limit 20
+  ```
 - **GitHub** (`gh`): repos `pizza-to-the-polls/pizzabase`, `pizza-to-the-polls/polls.pizza`.
 - Source checkouts: `~/Projects/pizzabase`, `~/Projects/polls.pizza`.
 
