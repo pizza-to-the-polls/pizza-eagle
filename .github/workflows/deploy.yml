@@ -57,17 +57,15 @@ jobs:
           aws-region: us-west-2
           # The role trusts this repo. See SLACK_BOT_PLAN.md for creation.
 
-      - name: Diff check
-        run: |
-          aws cloudformation validate-template \
-            --template-body file://cloudformation/ptp-ops.yaml
+      - name: Render template (splice bootstrap.sh into UserData)
+        run: bash scripts/render-template.sh # also validates
 
       - name: Deploy stack
         if: inputs.target == 'deploy' || inputs.target == 'both' || github.event_name == 'push'
         run: |
           aws cloudformation deploy \
             --stack-name "$STACK_NAME" \
-            --template-file cloudformation/ptp-ops.yaml \
+            --template-file build/ptp-ops.rendered.yaml \
             --capabilities CAPABILITY_NAMED_IAM \
             --no-execute-changeset  # CI shows the changeset; you review + execute
           echo "::notice::Change set created — review and execute in the console (P1 decision point)."

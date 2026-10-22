@@ -14,6 +14,7 @@ EIP_ALLOCATION_ID="TODO: eipalloc-..."                     # allocated by the CF
 DNS_ZONE_ID="TODO: Route53 public hosted zone id"
 DNS_NAME="bastion.polls.pizza"
 SECRETS_PREFIX="ptp/prod/ptp-ops"              # e.g. ptp/prod/ptp-ops — must match the CFN BotSecretsPrefix
+ADMIN_USER="duncombe"                          # sudo-capable human; reached via SSH-over-SSM
 [[ -f /etc/ptp-ops/bootstrap.env ]] && . /etc/ptp-ops/bootstrap.env
 
 #### 1. Base packages
@@ -49,10 +50,15 @@ rm -f /etc/ptp-ops/.env.raw
 #### 5b. GA service account (read-only) — investigations data source
 # scripts/ga.mjs reads this path (GA_SA_JSON default) as the ptp-bot user.
 install -d -o ptp-bot -g ptp-bot -m 700 /home/ptp-bot/.config /home/ptp-bot/.config/ptp
-aws secretsmanager get-secret-value --secret-id "${SECRETS_PREFIX}/ga-readonly" \
-  --query SecretString --output text > /home/ptp-bot/.config/ptp/ga-readonly.json
-chown ptp-bot:ptp-bot /home/ptp-bot/.config/ptp/ga-readonly.json
-chmod 600 /home/ptp-bot/.config/ptp/ga-readonly.json
+if aws secretsmanager get-secret-value --secret-id "${SECRETS_PREFIX}/ga-readonly" \
+     --query SecretString --output text > /home/ptp-bot/.config/ptp/ga-readonly.json.tmp 2>/dev/null; then
+  mv /home/ptp-bot/.config/ptp/ga-readonly.json.tmp /home/ptp-bot/.config/ptp/ga-readonly.json
+  chown ptp-bot:ptp-bot /home/ptp-bot/.config/ptp/ga-readonly.json
+  chmod 600 /home/ptp-bot/.config/ptp/ga-readonly.json
+else
+  echo "WARN: secret ${SECRETS_PREFIX}/ga-readonly not found — GA queries stay disabled" >&2
+  rm -f /home/ptp-bot/.config/ptp/ga-readonly.json.tmp
+fi
 
 #### 6. Operator context + skills for the bot user
 install -d -o ptp-bot -g ptp-bot -m 755 /opt/ptp-bot/state
@@ -65,14 +71,39 @@ install -d -o ptp-bot -g ptp-bot /home/ptp-bot/.pi/agent/skills
 
 #### 7. Retool tunnel user (Retool Cloud dials in as this, no shell)
 id -u retool &>/dev/null || useradd -r -m -s /usr/sbin/nologin retool
-# Public key for the `retool` user is installed via:
-#   aws secretsmanager get-secret-value --secret-id "${SECRETS_PREFIX}/retool-ssh-key"
-# TODO: install authorized_keys for the retool user (Retool-generated keypair
-# entered in the Retool resource config).
+install -d -o retool -g retool -m 700 /home/retool/.ssh
+if aws secretsmanager get-secret-value --secret-id "${SECRETS_PREFIX}/retool-ssh-key" \
+     --query SecretString --output text > /home/retool/.ssh/authorized_keys.tmp 2>/dev/null; then
+  mv /home/retool/.ssh/authorized_keys.tmp /home/retool/.ssh/authorized_keys
+  chown retool:retool /home/retool/.ssh/authorized_keys
+  chmod 600 /home/retool/.ssh/authorized_keys
+else
+  echo "WARN: secret ${SECRETS_PREFIX}/retool-ssh-key not found — Retool tunnel fails until it exists" >&2
+  rm -f /home/retool/.ssh/authorized_keys.tmp
+fi
+
+#### 7b. Admin SSH user (humans reach sshd via Session Manager's
+#### SSH-over-SSM proxy — zero inbound; the SG stays Retool-only)
+id -u "$ADMIN_USER" &>/dev/null || useradd -m -s /bin/bash "$ADMIN_USER"
+usermod -aG wheel "$ADMIN_USER"
+install -d -o "$ADMIN_USER" -g "$ADMIN_USER" -m 700 "/home/$ADMIN_USER/.ssh"
+if aws secretsmanager get-secret-value --secret-id "${SECRETS_PREFIX}/admin-ssh-key" \
+     --query SecretString --output text > "/home/$ADMIN_USER/.ssh/authorized_keys.tmp" 2>/dev/null; then
+  mv "/home/$ADMIN_USER/.ssh/authorized_keys.tmp" "/home/$ADMIN_USER/.ssh/authorized_keys"
+  chown "$ADMIN_USER:$ADMIN_USER" "/home/$ADMIN_USER/.ssh/authorized_keys"
+  chmod 600 "/home/$ADMIN_USER/.ssh/authorized_keys"
+else
+  echo "WARN: secret ${SECRETS_PREFIX}/admin-ssh-key not found — admin SSH disabled until it exists" >&2
+  rm -f "/home/$ADMIN_USER/.ssh/authorized_keys.tmp"
+fi
 sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
 systemctl reload sshd || systemctl reload sshd.service || true
 
 #### 8. EIP + DNS self-registration (box identity survives instance refresh)
+if [[ -z "$EIP_ALLOCATION_ID" || "$EIP_ALLOCATION_ID" == TODO* ]]; then
+  echo "FATAL: EIP_ALLOCATION_ID unset — bootstrap.env not written by UserData?" >&2
+  exit 1
+fi
 INSTANCE_ID=$(curl -s -H 'X-aws-ec2-metadata-token: '$(
   curl -s -X PUT -H 'X-aws-ec2-metadata-token-ttl-seconds: 300' \
   http://169.254.169.254/latest/api/token) \

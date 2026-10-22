@@ -1,10 +1,15 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
   ptp-ops — the PTP ops box (bot host + Retool tunnel endpoint).
-  DRAFT: review every TODO before first deploy. Resources match the
-  design in ~/Projects/SLACK_BOT_PLAN.md.
+  Deploy the RENDERED template (build/ptp-ops.rendered.yaml from
+  scripts/render-template.sh — splices scripts/bootstrap.sh into UserData).
+  Design: ~/Projects/SLACK_BOT_PLAN.md.
 
 Parameters:
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC where the Aurora cluster lives (bot has no inbound — SSM and Data API are outbound-only)
+
   SubnetId:
     Type: AWS::EC2::Subnet::Id
     Description: Private subnet (SSM egress only; bot has no inbound)
@@ -34,6 +39,9 @@ Parameters:
     Type: String
     Description: S3 bucket for nightly state backups (sessions/case history). Empty string disables the grant.
     Default: ""
+
+Conditions:
+  HasBackupBucket: !Not [!Equals [!Ref BackupBucketName, ""]]
 
 Resources:
   BotRole:
@@ -119,12 +127,18 @@ Resources:
                 Effect: Allow
                 Action: [route53:ChangeResourceRecordSets]
                 Resource: !Sub arn:aws:route53:::hostedzone/${DnsHostedZoneId}
-              - Sid: StateBackup # nightly tar of state/ (sessions + case history)
-                Effect: Allow
-                Action: [s3:PutObject]
-                Resource: !Sub arn:aws:s3:::${BackupBucketName}/*
+              # Nightly tar of state/ (sessions + case history). Grant exists
+              # ONLY when BackupBucketName is set — the empty-string default
+              # must not widen to a malformed s3:::/* resource.
+              - !If
+                - HasBackupBucket
+                - Sid: StateBackup
+                  Effect: Allow
+                  Action: [s3:PutObject]
+                  Resource: !Sub arn:aws:s3:::${BackupBucketName}/*
+                - !Ref AWS::NoValue
                 # TODO when BackupBucketName is set: also add s3:GetObject
-                # (restore path) and versioning/bucket policy at the bucket.
+                # (restore path) + bucket versioning policy on the bucket.
 
   OpsInstanceProfile:
     Type: AWS::IAM::InstanceProfile
@@ -140,7 +154,7 @@ Resources:
     Type: AWS::EC2::SecurityGroup
     Properties:
       GroupDescription: ptp-ops box — egress only except Retool tunnel
-      VpcId: TODO_VPC_ID # P1: fill from the console (VPC where Aurora lives) — ptp-agent can't ec2:DescribeVpc
+      VpcId: !Ref VpcId
       SecurityGroupEgress:
         - IpProtocol: tcp
           FromPort: 443
@@ -171,9 +185,23 @@ Resources:
         SecurityGroupIds: [!GetAtt OpsSecurityGroup.GroupId]
         MetadataOptions:
           HttpTokens: required # IMDSv2
-        # UserData (base64 of scripts/bootstrap.sh with parameter substitution)
-        # TODO: generate at deploy: `base64 <(envsubst < scripts/bootstrap.sh)`
-        UserData: ""
+        # UserData is RENDERED: scripts/render-template.sh splices
+        # base64(scripts/bootstrap.sh) at the BOOTSTRAP marker —
+        # bootstrap.sh stays the single source of truth. CFN values flow to
+        # it via /etc/ptp-ops/bootstrap.env (the override file it reads).
+        UserData:
+          Fn::Base64: !Sub |
+            #!/bin/bash
+            set -euo pipefail
+            mkdir -p /etc/ptp-ops
+            cat > /etc/ptp-ops/bootstrap.env <<'ENVEOF'
+            EIP_ALLOCATION_ID=${OpsElasticIP.AllocationId}
+            DNS_ZONE_ID=${DnsHostedZoneId}
+            DNS_NAME=bastion.polls.pizza
+            SECRETS_PREFIX=${BotSecretsPrefix}
+            ENVEOF
+            echo '@@BOOTSTRAP_B64@@' | base64 -d > /root/bootstrap.sh
+            bash /root/bootstrap.sh
 
   OpsASG:
     Type: AWS::AutoScaling::AutoScalingGroup

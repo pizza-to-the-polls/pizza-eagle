@@ -114,16 +114,52 @@ npm run ask -- --session <id> "follow-up"   # resume a case; ids print under eac
 
 ## Deploy (ops box)
 
-The CFN stack (`cloudformation/ptp-ops.yaml`, **DRAFT — review TODOs**)
-creates: IAM instance role = `ptp-triage-readonly-policy` + SSM core +
-`GetSecretValue` on the bot secret; SG (egress 443, inbound 22 for Retool
-only); ASG min=max=1 with the `bootstrap.sh` user-data; EIP + Route53
-public record `bastion.polls.pizza` (Retool tunnel dependency — see plan §3).
+The CFN stack (`cloudformation/ptp-ops.yaml`) creates: IAM instance role =
+triage-readonly policy + SSM core + `GetSecretValue` on the bot secrets; SG
+(egress 443, inbound 22 for Retool CIDRs only); ASG min=max=1; EIP +
+Route53 record `bastion.polls.pizza`; `base64(scripts/bootstrap.sh)` as
+user-data.
+
+**Always deploy the rendered template** — the raw one has no user-data:
+
+```bash
+bash scripts/render-template.sh   # splices bootstrap.sh into UserData + validates
+aws cloudformation deploy --stack-name ptp-ops \
+  --template-file build/ptp-ops.rendered.yaml \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --parameter-overrides VpcId=vpc-… SubnetId=subnet-… \
+    BotSecretArn=arn:… BackupBucketName=…
+```
+
+CI (`.github/workflows/deploy.yml`, OIDC — no AWS keys in GitHub) renders and
+deploys the same way on template/bootstrap changes, changeset-first for
+review.
+
+### Human access to the box (no SSH keys at the cloud level)
+
+- Shell: `aws ssm start-session --targets "Key=tag:Name,Values=ptp-ops"`
+- Your laptop SSH key (installed from the `admin-ssh-key` secret), zero
+  inbound — Session Manager proxies sshd over localhost:
+
+```
+# ~/.ssh/config — once (instance id from the console)
+Host ptp-ops
+  HostName i-0…            # instance id (SSM target, not DNS)
+  User duncombe
+  IdentityFile ~/.ssh/id_ed25519
+  ProxyCommand sh -c "aws ssm start-session --target %h --document-name AWS-SSHSessionCommand"
+```
+
+  (needs `brew install --cask session-manager-plugin` locally)
+
+- Port-forward to Aurora:
+  `aws ssm start-session --targets "Key=tag:Name,Values=ptp-ops" \
+    --document-name AWS-StartPortForwardingSessionToRemoteSocket \
+    --parameters host=pizzabase.cluster-c0xyw6eawjva.us-west-2.rds.amazonaws.com,portNumber=5432`
 
 Box updates are pull-based: nightly `ptp-bot-update.timer` runs
 `git pull --ff-only && npm ci && npm run build && systemctl restart ptp-bot`;
-GitHub Actions (OIDC, no AWS keys in GitHub) can trigger the same via
-`ssm send-command`.
+GitHub Actions can trigger the same via `ssm send-command`.
 
 ## Security boundary (read-only by construction)
 
@@ -137,13 +173,17 @@ GitHub Actions (OIDC, no AWS keys in GitHub) can trigger the same via
 - Never post raw contact info or raw bucket paths to Slack — conventions
   live in `agent/AGENTS.md`.
 
-## TODO before first deploy
+## Remaining before first deploy (console-side — Matt)
 
-- [ ] Slack app in the PTP workspace (not just dev) + channel/user allowlists
-- [ ] `cloudformation/ptp-ops.yaml` TODOs: VPC/subnet ids, public zone, AMI
-      SSM param resolution, Retool CIDR ingress rules, UserData b64
-- [ ] `scripts/bootstrap.sh` TODOs: repo URL, EIP allocation, secret names,
-      retool user authorized_keys
+- [ ] Secrets under prefix `ptp/prod/ptp-ops/`: `env` (bot tokens, model
+      key, alert webhook), `ga-readonly` (GA service-account JSON),
+      `retool-ssh-key`, `admin-ssh-key`; P4 adds `gh-pr-token`
+- [ ] `GA_PROPERTY_ID` (GA Admin → Property settings) — or enable the
+      Analytics Admin API in GCP project 115859449668 for self-discovery
+- [ ] Deploy params: `VpcId`, `SubnetId`, `BotSecretArn`, `BackupBucketName`
+- [ ] IAM: `ptp-ops-github-deploy` OIDC role for Actions (repo
+      pizza-to-the-polls/ptp-ops, ref main)
+- [ ] P4 (when ready): fine-grained PAT + branch protection on `main` of
+      polls.pizza + pizzabase (branch protection is load-bearing)
 - [ ] Skills sync for the `ptp-bot` user (`~/.pi/agent/skills`)
-- [ ] Backup of `state/` (sessions + case history)
-- [ ] The `pg_default_acl` gap fix (new tables invisible to `retool` role)
+- [ ] Post-P3: `pg_default_acl` fix (new tables invisible to `retool` role)
