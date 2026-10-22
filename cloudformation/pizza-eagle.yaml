@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  ptp-ops — the PTP ops box (bot host + Retool tunnel endpoint).
-  Deploy the RENDERED template (build/ptp-ops.rendered.yaml from
+  pizza-eagle — the PTP ops box (bot host + Retool tunnel endpoint).
+  Deploy the RENDERED template (build/pizza-eagle.rendered.yaml from
   scripts/render-template.sh — splices scripts/bootstrap.sh into UserData).
   Design: ~/Projects/SLACK_BOT_PLAN.md.
 
@@ -26,7 +26,7 @@ Parameters:
   BotSecretsPrefix:
     Type: String
     Description: Secrets Manager name prefix for the ops-box secrets (bot env, retool-ssh-key) — grants GetSecretValue on all matches
-    Default: ptp/prod/ptp-ops
+    Default: ptp/prod/pizza-eagle
   DnsHostedZoneId:
     Type: String
     Description: Route53 PUBLIC hosted zone id (Retool Cloud must resolve bastion.polls.pizza over the internet)
@@ -153,7 +153,7 @@ Resources:
   OpsSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: ptp-ops box — egress only except Retool tunnel
+      GroupDescription: pizza-eagle box — egress only except Retool tunnel
       VpcId: !Ref VpcId
       SecurityGroupEgress:
         - IpProtocol: tcp
@@ -188,13 +188,13 @@ Resources:
         # UserData is RENDERED: scripts/render-template.sh splices
         # base64(scripts/bootstrap.sh) at the BOOTSTRAP marker —
         # bootstrap.sh stays the single source of truth. CFN values flow to
-        # it via /etc/ptp-ops/bootstrap.env (the override file it reads).
+        # it via /etc/pizza-eagle/bootstrap.env (the override file it reads).
         UserData:
           Fn::Base64: !Sub |
             #!/bin/bash
             set -euo pipefail
-            mkdir -p /etc/ptp-ops
-            cat > /etc/ptp-ops/bootstrap.env <<'ENVEOF'
+            mkdir -p /etc/pizza-eagle
+            cat > /etc/pizza-eagle/bootstrap.env <<'ENVEOF'
             EIP_ALLOCATION_ID=${OpsElasticIP.AllocationId}
             DNS_ZONE_ID=${DnsHostedZoneId}
             DNS_NAME=bastion.polls.pizza
@@ -215,7 +215,7 @@ Resources:
         Version: !GetAtt OpsLaunchTemplate.LatestVersionNumber
       Tags:
         - Key: Name
-          Value: ptp-ops
+          Value: pizza-eagle
           PropagateAtLaunch: true
 
 Outputs:

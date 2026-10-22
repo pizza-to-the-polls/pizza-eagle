@@ -1,7 +1,7 @@
 /**
- * ptp-bot — Slack front-end around a pi agent session.
+ * pizza-eagle — Slack front-end around a pi agent session.
  *
- * @ptp-bot <question>  →  ack "🔎 investigating…"  →  pi subprocess  →
+ * @pizza-eagle <question>  →  ack "🔎 investigating…"  →  pi subprocess  →
  * findings posted to the same thread. Follow-ups in the thread resume
  * the thread's pi session.
  */
@@ -60,15 +60,15 @@ async function main(): Promise<void> {
     try {
       await ack?.();
     } catch (e) {
-      console.error("[ptp-bot] ack failed:", e);
+      console.error("[pizza-eagle] ack failed:", e);
     }
     const event = (body as { event?: MentionEvent })?.event;
-    console.log(`[ptp-bot] app_mention received — channel=${event?.channel ?? "?"} user=${event?.user ?? "?"} thread=${event?.thread_ts ?? "(new)"}`);
+    console.log(`[pizza-eagle] app_mention received — channel=${event?.channel ?? "?"} user=${event?.user ?? "?"} thread=${event?.thread_ts ?? "(new)"}`);
     if (!event || event.bot_id) return; // no payload, or bot-sourced mention
     try {
       await handle(event);
     } catch (e) {
-      console.error("[ptp-bot] handler error:", e);
+      console.error("[pizza-eagle] handler error:", e);
     }
   });
 
@@ -78,7 +78,7 @@ async function main(): Promise<void> {
 
     // Allowlists: channels (if configured) and users (if configured).
     if (cfg.allowedChannels.size && !cfg.allowedChannels.has(event.channel)) {
-      console.log(`[ptp-bot] ignored mention in un-allowlisted channel ${event.channel}`);
+      console.log(`[pizza-eagle] ignored mention in un-allowlisted channel ${event.channel}`);
       return;
     }
     if (cfg.allowedUsers.size && !cfg.allowedUsers.has(event.user)) {
@@ -138,14 +138,14 @@ async function main(): Promise<void> {
           await editStatus(slack, event.channel, statusTs, ":x: Investigation failed.");
         }
         await postFindings(slack, event.channel, threadTs, `:x: ${detail}`);
-        console.error("[ptp-bot] investigation failed:", e);
+        console.error("[pizza-eagle] investigation failed:", e);
       }
     });
   }
 
   const shutdown = () => {
     shuttingDown = true;
-    console.log("[ptp-bot] shutting down");
+    console.log("[pizza-eagle] shutting down");
     for (const child of activeInvestigations) {
       // Kill in-flight investigations — do not orphan them across restarts.
       try {
@@ -164,23 +164,23 @@ async function main(): Promise<void> {
   const slackClientForAuthCheck = new WebClient(cfg.slackBotToken);
   try {
     const me = await slackClientForAuthCheck.auth.test();
-    console.log(`[ptp-bot] token ok — bot: @${me.user as string} (${me.user_id}) team: ${me.team as string}`);
+    console.log(`[pizza-eagle] token ok — bot: @${me.user as string} (${me.user_id}) team: ${me.team as string}`);
   } catch (e) {
-    console.warn(`[ptp-bot] bot token failed auth.test: ${(e as Error).message}`);
+    console.warn(`[pizza-eagle] bot token failed auth.test: ${(e as Error).message}`);
   }
 
-  socket.on("connecting", () => console.log("[ptp-bot] socket: connecting…"));
-  socket.on("connected", () => console.log("[ptp-bot] socket: connected"));
-  socket.on("disconnect", () => console.log("[ptp-bot] socket: DISCONNECTED"));
-  socket.on("reconnecting", () => console.log("[ptp-bot] socket: reconnecting…"));
+  socket.on("connecting", () => console.log("[pizza-eagle] socket: connecting…"));
+  socket.on("connected", () => console.log("[pizza-eagle] socket: connected"));
+  socket.on("disconnect", () => console.log("[pizza-eagle] socket: DISCONNECTED"));
+  socket.on("reconnecting", () => console.log("[pizza-eagle] socket: reconnecting…"));
 
   await socket.start();
   console.log(
-    `[ptp-bot] up — channels=${cfg.allowedChannels.size || "any"} users=${cfg.allowedUsers.size || "any"} concurrency=${cfg.maxConcurrent}`,
+    `[pizza-eagle] up — channels=${cfg.allowedChannels.size || "any"} users=${cfg.allowedUsers.size || "any"} concurrency=${cfg.maxConcurrent}`,
   );
 }
 
 main().catch((e) => {
-  console.error("[ptp-bot] fatal:", e);
+  console.error("[pizza-eagle] fatal:", e);
   process.exit(1);
 });

@@ -1,12 +1,12 @@
 [Unit]
-Description=ptp-bot update (pull latest agent + listener, rebuild, restart)
+Description=pizza-eagle update (pull latest agent + listener, rebuild, restart)
 
 [Service]
 Type=oneshot
 # --ff-only: never auto-merge; a diverged repo means the update fails loudly
 # (OnFailure below posts to Slack) and a human looks at it.
-ExecStart=/usr/bin/git -C /opt/ptp-bot pull --ff-only
+ExecStart=/usr/bin/git -C /opt/pizza-eagle pull --ff-only
 ExecStart=/usr/bin/npm ci --omit=dev
 ExecStart=/usr/bin/npm run build
-ExecStartPost=/bin/systemctl restart ptp-bot.service
+ExecStartPost=/bin/systemctl restart pizza-eagle.service
 OnFailure=notify-failure@%n.service

@@ -1,5 +1,5 @@
 [Unit]
-Description=ptp-bot — Slack front-end around a pi agent session
+Description=pizza-eagle — Slack front-end around a pi agent session
 After=network-online.target
 Wants=network-online.target
 
@@ -7,11 +7,11 @@ Wants=network-online.target
 Type=simple
 # Dedicated non-privileged user; its only AWS identity is the instance role
 # (read-only triage policy). The bastion's DB-write surface stays unreadable.
-User=ptp-bot
-Group=ptp-bot
-WorkingDirectory=/opt/ptp-bot
+User=pizza-eagle
+Group=pizza-eagle
+WorkingDirectory=/opt/pizza-eagle
 # Populated by bootstrap.sh from Secrets Manager (Slack tokens etc.)
-EnvironmentFile=/opt/ptp-bot/.env
+EnvironmentFile=/opt/pizza-eagle/.env
 ExecStart=/usr/bin/node dist/index.js
 Restart=always
 RestartSec=10
@@ -19,7 +19,7 @@ RestartSec=10
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ReadWritePaths=/opt/ptp-bot/state
+ReadWritePaths=/opt/pizza-eagle/state
 ProtectHome=read-only
 [Install]
 WantedBy=multi-user.target

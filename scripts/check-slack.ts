@@ -61,7 +61,7 @@ async function main(): Promise<void> {
       try {
         await slack.chat.postMessage({
           channel,
-          text: ":white_check_mark: ptp-bot setup check — you can delete this.",
+          text: ":white_check_mark: pizza-eagle setup check — you can delete this.",
         });
         ok(`channel ${channel}`, true, "bot posted (invited)");
       } catch (e) {

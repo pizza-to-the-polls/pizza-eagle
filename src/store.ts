@@ -32,7 +32,7 @@ export class ThreadStore {
       } catch (e) {
         // A corrupt threads.json shouldn't take the listener down — start
         // fresh; the pi session files under state/work still carry context.
-        console.warn(`[ptp-bot] ${file} unreadable (${(e as Error).message}) — starting empty`);
+        console.warn(`[pizza-eagle] ${file} unreadable (${(e as Error).message}) — starting empty`);
         this.data = {};
       }
     } else {

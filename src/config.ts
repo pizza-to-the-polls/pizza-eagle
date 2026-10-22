@@ -107,7 +107,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     piBin: e.PI_BIN ?? "pi",
     stateDir: e.BOT_STATE_DIR ?? "./state",
     // repo-relative default: agent/ inside this repo (works from repo root
-    // locally and from WorkingDirectory=/opt/ptp-bot on the box)
+    // locally and from WorkingDirectory=/opt/pizza-eagle on the box)
     agentDir: e.AGENT_DIR ?? "./agent",
     timeoutMs: Number(e.INVESTIGATE_TIMEOUT_MS ?? 10 * 60_000),
     maxConcurrent: Math.max(1, Number(e.MAX_CONCURRENT ?? 2)),

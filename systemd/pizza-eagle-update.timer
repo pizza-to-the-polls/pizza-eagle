@@ -1,0 +1,11 @@
+[Unit]
+Description=pizza-eagle nightly update (git pull --ff-only + rebuild + restart)
+Conflicts=pizza-eagle-update.service before-reboot
+
+[Timer]
+OnCalendar=*-*-* 04:30:00
+Persistent=true
+Unit=pizza-eagle-update.service
+
+[Install]
+WantedBy=timers.target

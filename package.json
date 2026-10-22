@@ -1,8 +1,8 @@
 {
-  "name": "ptp-ops",
+  "name": "pizza-eagle",
   "version": "0.1.0",
   "private": true,
-  "description": "ptp-bot — Slack front-end around a pi agent session for PTP ops investigations",
+  "description": "pizza-eagle — Slack front-end around a pi agent session for PTP ops investigations",
   "type": "commonjs",
   "main": "dist/index.js",
   "engines": {
@@ -14,7 +14,7 @@
     "smoke": "tsx scripts/smoke.ts",
     "ask": "tsx scripts/ask.ts",
     "check:slack": "tsx scripts/check-slack.ts",
-    "backup": "tar czf - -C \"${BOT_STATE_DIR:-./state}\" . | aws s3 cp - \"s3://${BOT_BACKUP_BUCKET:-ptp-ops-backups}/state-$(date +%Y%m%d-%H%M).tgz\"",
+    "backup": "tar czf - -C \"${BOT_STATE_DIR:-./state}\" . | aws s3 cp - \"s3://${BOT_BACKUP_BUCKET:-pizza-eagle-backups}/state-$(date +%Y%m%d-%H%M).tgz\"",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js"
   },

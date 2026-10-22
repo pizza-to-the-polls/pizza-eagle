@@ -1,21 +1,21 @@
 #!/usr/bin/env bash
-# ptp-ops bootstrap — cloud-init user-data for the ops box.
+# pizza-eagle bootstrap — cloud-init user-data for the ops box.
 #
 # Idempotent: safe to re-run on every instance refresh. The CFN template
-# (cloudformation/ptp-ops.yaml) passes parameters via instance tags or
-# /etc/ptp-ops/bootstrap.env. Where marked TODO, fill in the concrete
+# (cloudformation/pizza-eagle.yaml) passes parameters via instance tags or
+# /etc/pizza-eagle/bootstrap.env. Where marked TODO, fill in the concrete
 # values for the PTP account before first deploy.
 set -euo pipefail
 
-#### Parameters (override via /etc/ptp-ops/bootstrap.env if present)
-PTP_BOT_HOME=/opt/ptp-bot
+#### Parameters (override via /etc/pizza-eagle/bootstrap.env if present)
+PTP_BOT_HOME=/opt/pizza-eagle
 PTP_BOT_REPO="https://github.com/pizza-to-the-polls/pizza-eagle.git" # read-only over https on the box; updates are pull-based
 EIP_ALLOCATION_ID="TODO: eipalloc-..."                     # allocated by the CFN stack
 DNS_ZONE_ID="TODO: Route53 public hosted zone id"
 DNS_NAME="bastion.polls.pizza"
-SECRETS_PREFIX="ptp/prod/ptp-ops"              # e.g. ptp/prod/ptp-ops — must match the CFN BotSecretsPrefix
+SECRETS_PREFIX="ptp/prod/pizza-eagle"              # e.g. ptp/prod/pizza-eagle — must match the CFN BotSecretsPrefix
 ADMIN_USER="duncombe"                          # sudo-capable human; reached via SSH-over-SSM
-[[ -f /etc/ptp-ops/bootstrap.env ]] && . /etc/ptp-ops/bootstrap.env
+[[ -f /etc/pizza-eagle/bootstrap.env ]] && . /etc/pizza-eagle/bootstrap.env
 
 #### 1. Base packages
 dnf install -y git nodejs jq amazon-cloudwatch-agent || {
@@ -28,46 +28,46 @@ dnf install -y git nodejs jq amazon-cloudwatch-agent || {
 npm install -g @earendil-works/pi-coding-agent
 
 #### 3. Bot OS user — no sudo, its only identity is the instance role
-id -u ptp-bot &>/dev/null || useradd -r -m -s /usr/sbin/nologin ptp-bot
+id -u pizza-eagle &>/dev/null || useradd -r -m -s /usr/sbin/nologin pizza-eagle
 
 #### 4. Checkout
 mkdir -p "$PTP_BOT_HOME"
 if [[ ! -d "$PTP_BOT_HOME/.git" ]]; then
   git clone --depth 1 "$PTP_BOT_REPO" "$PTP_BOT_HOME"
-  chown -R ptp-bot:ptp-bot "$PTP_BOT_HOME"
+  chown -R pizza-eagle:pizza-eagle "$PTP_BOT_HOME"
 fi
 
 #### 5. Boot secrets from Secrets Manager (instance role is scoped to these)
-mkdir -p /etc/ptp-ops
+mkdir -p /etc/pizza-eagle
 aws secretsmanager get-secret-value --secret-id "${SECRETS_PREFIX}/env" \
-  --query SecretString --output text > /etc/ptp-ops/.env.raw
+  --query SecretString --output text > /etc/pizza-eagle/.env.raw
 # Expect a JSON object of {SLACK_APP_TOKEN, SLACK_BOT_TOKEN, ...}
-jq -r 'to_entries | .[] | "\(.key)=\(.value)"' /etc/ptp-ops/.env.raw > "$PTP_BOT_HOME/.env"
-chown ptp-bot:ptp-bot "$PTP_BOT_HOME/.env"
+jq -r 'to_entries | .[] | "\(.key)=\(.value)"' /etc/pizza-eagle/.env.raw > "$PTP_BOT_HOME/.env"
+chown pizza-eagle:pizza-eagle "$PTP_BOT_HOME/.env"
 chmod 600 "$PTP_BOT_HOME/.env"
-rm -f /etc/ptp-ops/.env.raw
+rm -f /etc/pizza-eagle/.env.raw
 
 #### 5b. GA service account (read-only) — investigations data source
-# scripts/ga.mjs reads this path (GA_SA_JSON default) as the ptp-bot user.
-install -d -o ptp-bot -g ptp-bot -m 700 /home/ptp-bot/.config /home/ptp-bot/.config/ptp
+# scripts/ga.mjs reads this path (GA_SA_JSON default) as the pizza-eagle user.
+install -d -o pizza-eagle -g pizza-eagle -m 700 /home/pizza-eagle/.config /home/pizza-eagle/.config/ptp
 if aws secretsmanager get-secret-value --secret-id "${SECRETS_PREFIX}/ga-readonly" \
-     --query SecretString --output text > /home/ptp-bot/.config/ptp/ga-readonly.json.tmp 2>/dev/null; then
-  mv /home/ptp-bot/.config/ptp/ga-readonly.json.tmp /home/ptp-bot/.config/ptp/ga-readonly.json
-  chown ptp-bot:ptp-bot /home/ptp-bot/.config/ptp/ga-readonly.json
-  chmod 600 /home/ptp-bot/.config/ptp/ga-readonly.json
+     --query SecretString --output text > /home/pizza-eagle/.config/ptp/ga-readonly.json.tmp 2>/dev/null; then
+  mv /home/pizza-eagle/.config/ptp/ga-readonly.json.tmp /home/pizza-eagle/.config/ptp/ga-readonly.json
+  chown pizza-eagle:pizza-eagle /home/pizza-eagle/.config/ptp/ga-readonly.json
+  chmod 600 /home/pizza-eagle/.config/ptp/ga-readonly.json
 else
   echo "WARN: secret ${SECRETS_PREFIX}/ga-readonly not found — GA queries stay disabled" >&2
-  rm -f /home/ptp-bot/.config/ptp/ga-readonly.json.tmp
+  rm -f /home/pizza-eagle/.config/ptp/ga-readonly.json.tmp
 fi
 
 #### 6. Operator context + skills for the bot user
-install -d -o ptp-bot -g ptp-bot -m 755 /opt/ptp-bot/state
-install -o ptp-bot -g ptp-bot -m 644 "$PTP_BOT_HOME/agent/AGENTS.md" \
-  /opt/ptp-bot/state/AGENTS.template.md
+install -d -o pizza-eagle -g pizza-eagle -m 755 /opt/pizza-eagle/state
+install -o pizza-eagle -g pizza-eagle -m 644 "$PTP_BOT_HOME/agent/AGENTS.md" \
+  /opt/pizza-eagle/state/AGENTS.template.md
 # Skills (triage, agent-status, ...) — copied once by provisioning, then
 # ride the repo via the update timer:
-install -d -o ptp-bot -g ptp-bot /home/ptp-bot/.pi/agent/skills
-# TODO: rsync -a "$PTP_BOT_HOME/skills/" /home/ptp-bot/.pi/agent/skills/
+install -d -o pizza-eagle -g pizza-eagle /home/pizza-eagle/.pi/agent/skills
+# TODO: rsync -a "$PTP_BOT_HOME/skills/" /home/pizza-eagle/.pi/agent/skills/
 
 #### 7. Retool tunnel user (Retool Cloud dials in as this, no shell)
 id -u retool &>/dev/null || useradd -r -m -s /usr/sbin/nologin retool
@@ -119,13 +119,13 @@ aws route53 change-resource-record-sets --hosted-zone-id "$DNS_ZONE_ID" \
 # notify-failure@ must be present before any OnFailure= reference resolves.
 install -d /etc/systemd/system
 install -m 644 "$PTP_BOT_HOME/systemd/notify-failure@.service" \
-  "$PTP_BOT_HOME/systemd/ptp-bot.service" \
-  "$PTP_BOT_HOME/systemd/ptp-bot-update.service" \
-  "$PTP_BOT_HOME/systemd/ptp-bot-update.timer" \
-  "$PTP_BOT_HOME/systemd/ptp-bot-backup.service" \
-  "$PTP_BOT_HOME/systemd/ptp-bot-backup.timer" \
+  "$PTP_BOT_HOME/systemd/pizza-eagle.service" \
+  "$PTP_BOT_HOME/systemd/pizza-eagle-update.service" \
+  "$PTP_BOT_HOME/systemd/pizza-eagle-update.timer" \
+  "$PTP_BOT_HOME/systemd/pizza-eagle-backup.service" \
+  "$PTP_BOT_HOME/systemd/pizza-eagle-backup.timer" \
   /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable --now ptp-bot.service ptp-bot-update.timer ptp-bot-backup.timer
+systemctl enable --now pizza-eagle.service pizza-eagle-update.timer pizza-eagle-backup.timer
 
-echo "ptp-ops bootstrap complete."
+echo "pizza-eagle bootstrap complete."

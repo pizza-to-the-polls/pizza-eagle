@@ -22,7 +22,7 @@ const ok = (name: string, cond: boolean) => {
 };
 
 async function main(): Promise<void> {
-  const tmp = mkdtempSync(join(tmpdir(), "ptp-bot-smoke-"));
+  const tmp = mkdtempSync(join(tmpdir(), "pizza-eagle-smoke-"));
   const repoRoot = process.cwd();
 
   // 1. config validation (isolated from the repo's own .env)

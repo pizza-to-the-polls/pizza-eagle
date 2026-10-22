@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * ga.mjs — read-only Google Analytics (GA4) helper for ptp-bot / Pizza Eagle.
+ * ga.mjs — read-only Google Analytics (GA4) helper for pizza-eagle / Pizza Eagle.
  *
  * Why a helper at all: the GA Data API needs a signed OAuth2 JWT per query,
  * which is clumsy to hand-run. This signs, fetches a token (scope is

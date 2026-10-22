@@ -1,10 +1,10 @@
 [Unit]
-Description=ptp-bot state backup nightly
+Description=pizza-eagle state backup nightly
 
 [Timer]
 OnCalendar=*-*-* 03:15:00
 Persistent=true
-Unit=ptp-bot-backup.service
+Unit=pizza-eagle-backup.service
 
 [Install]
 WantedBy=timers.target

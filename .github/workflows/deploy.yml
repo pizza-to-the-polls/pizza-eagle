@@ -2,11 +2,11 @@
 > **Not a Bolt/Slack-CLI-platform app.** This workflow deploys the *ops box*
 > (CloudFormation) and can trigger the on-box update script — the Slack
 > listener itself runs as a systemd unit on the instance
-> (`systemd/ptp-bot.service`), connecting out via Socket Mode.
+> (`systemd/pizza-eagle.service`), connecting out via Socket Mode.
 > Do not add `slack deploy` steps here; `slack-cli` is used locally only.
 
 # Deploys are pull-based first (the box self-updates nightly via
-# ptp-bot-update.timer: git pull --ff-only + rebuild + restart).
+# pizza-eagle-update.timer: git pull --ff-only + rebuild + restart).
 # This workflow exists for template changes (CFN) and for immediate
 # (rather than waiting-for-tonight) agent updates on the box.
 #
@@ -39,9 +39,9 @@ permissions:
 
 env:
   AWS_REGION: us-west-2
-  STACK_NAME: ptp-ops
+  STACK_NAME: pizza-eagle
   INSTANCE_TAG_KEY: Name
-  INSTANCE_TAG_VALUE: ptp-ops
+  INSTANCE_TAG_VALUE: pizza-eagle
 
 jobs:
   deploy:
@@ -53,7 +53,7 @@ jobs:
       - name: Assume deploy role (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::320802729995:role/ptp-ops-github-deploy
+          role-to-assume: arn:aws:iam::320802729995:role/pizza-eagle-github-deploy
           aws-region: us-west-2
           # The role trusts this repo. See SLACK_BOT_PLAN.md for creation.
 
@@ -65,7 +65,7 @@ jobs:
         run: |
           aws cloudformation deploy \
             --stack-name "$STACK_NAME" \
-            --template-file build/ptp-ops.rendered.yaml \
+            --template-file build/pizza-eagle.rendered.yaml \
             --capabilities CAPABILITY_NAMED_IAM \
             --no-execute-changeset  # CI shows the changeset; you review + execute
           echo "::notice::Change set created — review and execute in the console (P1 decision point)."
@@ -76,8 +76,8 @@ jobs:
           aws ssm send-command \
             --document-name "AWS-RunShellScript" \
             --targets "Key=tag:${INSTANCE_TAG_KEY},Values=${INSTANCE_TAG_VALUE}" \
-            --comment "ptp-bot immediate update (same as nightly timer)" \
-            --parameters 'commands=["git -C /opt/ptp-bot pull --ff-only","npm --prefix /opt/ptp-bot ci --omit=dev","npm --prefix /opt/ptp-bot run build","systemctl restart ptp-bot.service","systemctl is-active ptp-bot.service"]'
+            --comment "pizza-eagle immediate update (same as nightly timer)" \
+            --parameters 'commands=["git -C /opt/pizza-eagle pull --ff-only","npm --prefix /opt/pizza-eagle ci --omit=dev","npm --prefix /opt/pizza-eagle run build","systemctl restart pizza-eagle.service","systemctl is-active pizza-eagle.service"]'
 
       - name: Report
         if: always()

@@ -1,20 +1,20 @@
 # P0 — backup wiring
 #
 # Nightly tar of state/ (pi sessions = investigation transcripts, case
-# history, threads map) → S3. Runs as ptp-bot; the instance role needs
+# history, threads map) → S3. Runs as pizza-eagle; the instance role needs
 # s3:PutObject on the backup bucket (BotSecretsPrefix-adjacent grant —
 # add to the CFN stack with the bucket name).
 #
 # Install: systemd unit below; on the box the timer is enabled by
 # bootstrap.sh. Locally: just don't — this is box-only.
 [Unit]
-Description=ptp-bot state backup (sessions, case history, thread map)
+Description=pizza-eagle state backup (sessions, case history, thread map)
 
 [Service]
 Type=oneshot
-User=ptp-bot
-Group=ptp-bot
-WorkingDirectory=/opt/ptp-bot
-EnvironmentFile=/opt/ptp-bot/.env
+User=pizza-eagle
+Group=pizza-eagle
+WorkingDirectory=/opt/pizza-eagle
+EnvironmentFile=/opt/pizza-eagle/.env
 ExecStart=/usr/bin/bash -lc 'npm run backup'
 OnFailure=notify-failure@%n.service

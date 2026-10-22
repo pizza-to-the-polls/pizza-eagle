@@ -1,4 +1,4 @@
-# ptp-ops — ptp-bot
+# pizza-eagle — pizza-eagle
 
 **Status: scaffolded (2026-10-19) — compiles, not yet deployed.**
 
@@ -19,11 +19,11 @@ src/slack.ts         ack/async helpers, chunked posting
 src/store.ts         thread_ts → session/workdir map (state/threads.json)
 src/config.ts        env parsing
 agent/AGENTS.md      operator context (copied into each case workdir)
-systemd/             ptp-bot.service + nightly update timer + failure notifier
+systemd/             pizza-eagle.service + nightly update timer + failure notifier
 scripts/bootstrap.sh cloud-init user-data (idempotent, EIP+DNS self-registration)
 scripts/ga.mjs       zero-dep GA4 query helper (readonly SA; report/realtime/accounts)
 manifest.json         Slack app manifest (name, bot user, scopes, Socket Mode)
-cloudformation/      ptp-ops.yaml — DRAFT stack (review TODOs before deploy)
+cloudformation/      pizza-eagle.yaml — DRAFT stack (review TODOs before deploy)
 ```
 
 ## How a mention flows
@@ -70,7 +70,7 @@ npm run check:slack    # validates: bot token, socket connect, channel invite, u
 ### Run it
 
 ```bash
-npm run dev             # listener — console shows "[ptp-bot] up …" on connect
+npm run dev             # listener — console shows "[pizza-eagle] up …" on connect
 ```
 
 No public URL is needed (Socket Mode is outbound wss) — this runs fine on a laptop.
@@ -86,7 +86,7 @@ In the test channel:
 What happens, in order:
 
 1. **Instant status reply** in the thread: `🔎 Investigating — … (case <id>, question #1)` — that's the ack.
-2. The investigation runs **async** (minutes, not seconds). Watch the `npm run dev` console for `[ptp-bot]` logs.
+2. The investigation runs **async** (minutes, not seconds). Watch the `npm run dev` console for `[pizza-eagle]` logs.
 3. Findings post **as threaded replies** (long answers split at ~3800 chars), status message flips to ✅ (or ❌ with the error tail).
 
 **Follow-ups must be *in the same thread*** — a reply that @-mentions the bot again resumes the same pi session (same case). A fresh top-level @mention starts a new case. That's the whole mental model: one thread = one case.
@@ -108,13 +108,13 @@ npm run ask -- --session <id> "follow-up"   # resume a case; ids print under eac
 | `not_in_channel` on check or silent ignoring | Bot not invited → `/invite` the app in the test channel |
 | Mention ignored, console shows "un-allowlisted channel/user" | `ALLOWED_CHANNELS`/`ALLOWED_USERS` in `.env` are stale → re-copy IDs |
 | `Missing required env var` | No `.env` and no shell exports → fill `.env` (listener reads it, shell env wins) |
-| Reply never comes, case stuck | Check `state/work/<case>/case-history.md` + `journalctl -u ptp-bot` (or dev console) — timeout default 10 min |
+| Reply never comes, case stuck | Check `state/work/<case>/case-history.md` + `journalctl -u pizza-eagle` (or dev console) — timeout default 10 min |
 
-`PI_BIN` defaults to `pi` on PATH. Locally your own `~/.pi/agent/skills` work as-is; on the ops box the bot runs as the `ptp-bot` user whose `~/.pi` carries the synced skills.
+`PI_BIN` defaults to `pi` on PATH. Locally your own `~/.pi/agent/skills` work as-is; on the ops box the bot runs as the `pizza-eagle` user whose `~/.pi` carries the synced skills.
 
 ## Deploy (ops box)
 
-The CFN stack (`cloudformation/ptp-ops.yaml`) creates: IAM instance role =
+The CFN stack (`cloudformation/pizza-eagle.yaml`) creates: IAM instance role =
 triage-readonly policy + SSM core + `GetSecretValue` on the bot secrets; SG
 (egress 443, inbound 22 for Retool CIDRs only); ASG min=max=1; EIP +
 Route53 record `bastion.polls.pizza`; `base64(scripts/bootstrap.sh)` as
@@ -124,8 +124,8 @@ user-data.
 
 ```bash
 bash scripts/render-template.sh   # splices bootstrap.sh into UserData + validates
-aws cloudformation deploy --stack-name ptp-ops \
-  --template-file build/ptp-ops.rendered.yaml \
+aws cloudformation deploy --stack-name pizza-eagle \
+  --template-file build/pizza-eagle.rendered.yaml \
   --capabilities CAPABILITY_NAMED_IAM \
   --parameter-overrides VpcId=vpc-… SubnetId=subnet-… \
     BotSecretArn=arn:… BackupBucketName=…
@@ -137,13 +137,13 @@ review.
 
 ### Human access to the box (no SSH keys at the cloud level)
 
-- Shell: `aws ssm start-session --targets "Key=tag:Name,Values=ptp-ops"`
+- Shell: `aws ssm start-session --targets "Key=tag:Name,Values=pizza-eagle"`
 - Your laptop SSH key (installed from the `admin-ssh-key` secret), zero
   inbound — Session Manager proxies sshd over localhost:
 
 ```
 # ~/.ssh/config — once (instance id from the console)
-Host ptp-ops
+Host pizza-eagle
   HostName i-0…            # instance id (SSM target, not DNS)
   User duncombe
   IdentityFile ~/.ssh/id_ed25519
@@ -153,17 +153,17 @@ Host ptp-ops
   (needs `brew install --cask session-manager-plugin` locally)
 
 - Port-forward to Aurora:
-  `aws ssm start-session --targets "Key=tag:Name,Values=ptp-ops" \
+  `aws ssm start-session --targets "Key=tag:Name,Values=pizza-eagle" \
     --document-name AWS-StartPortForwardingSessionToRemoteSocket \
     --parameters host=pizzabase.cluster-c0xyw6eawjva.us-west-2.rds.amazonaws.com,portNumber=5432`
 
-Box updates are pull-based: nightly `ptp-bot-update.timer` runs
-`git pull --ff-only && npm ci && npm run build && systemctl restart ptp-bot`;
+Box updates are pull-based: nightly `pizza-eagle-update.timer` runs
+`git pull --ff-only && npm ci && npm run build && systemctl restart pizza-eagle`;
 GitHub Actions can trigger the same via `ssm send-command`.
 
 ## Security boundary (read-only by construction)
 
-- The `ptp-bot` OS user's only AWS identity is the instance role: logs
+- The `pizza-eagle` OS user's only AWS identity is the instance role: logs
   read, S3 media read, `PizzaBaseReadOnly` Data API (`ptp_ro` = SELECT on
   all 14 tables — verified), Bugsnag readonly, gh, GA4 readonly (aggregate
   analytics, no PII — SA at `~/.config/ptp/ga-readonly.json`).
@@ -175,15 +175,15 @@ GitHub Actions can trigger the same via `ssm send-command`.
 
 ## Remaining before first deploy (console-side — Matt)
 
-- [ ] Secrets under prefix `ptp/prod/ptp-ops/`: `env` (bot tokens, model
+- [ ] Secrets under prefix `ptp/prod/pizza-eagle/`: `env` (bot tokens, model
       key, alert webhook), `ga-readonly` (GA service-account JSON),
       `retool-ssh-key`, `admin-ssh-key`; P4 adds `gh-pr-token`
 - [ ] `GA_PROPERTY_ID` (GA Admin → Property settings) — or enable the
       Analytics Admin API in GCP project 115859449668 for self-discovery
 - [ ] Deploy params: `VpcId`, `SubnetId`, `BotSecretArn`, `BackupBucketName`
-- [ ] IAM: `ptp-ops-github-deploy` OIDC role for Actions (repo
+- [ ] IAM: `pizza-eagle-github-deploy` OIDC role for Actions (repo
       pizza-to-the-polls/pizza-eagle, ref main)
 - [ ] P4 (when ready): fine-grained PAT + branch protection on `main` of
       polls.pizza + pizzabase (branch protection is load-bearing)
-- [ ] Skills sync for the `ptp-bot` user (`~/.pi/agent/skills`)
+- [ ] Skills sync for the `pizza-eagle` user (`~/.pi/agent/skills`)
 - [ ] Post-P3: `pg_default_acl` fix (new tables invisible to `retool` role)

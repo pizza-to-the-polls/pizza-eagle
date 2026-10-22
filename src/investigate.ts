@@ -8,7 +8,7 @@
  * down the listener, and each run gets a clean tool environment. The
  * session id is stable per Slack thread, so follow-ups resume context.
  *
- * Credential boundary: this process runs as the `ptp-bot` OS user with
+ * Credential boundary: this process runs as the `pizza-eagle` OS user with
  * the instance role (read-only triage policy) — pi's shell tools inherit
  * that. There is deliberately no write path to the DB from here.
  */
@@ -50,7 +50,7 @@ export async function runInvestigation(
   try {
     copyFileSync(join(cfg.agentDir, "AGENTS.md"), join(opts.workdir, "AGENTS.md"));
   } catch {
-    console.warn(`[ptp-bot] no AGENTS.md in AGENT_DIR (${cfg.agentDir}) — running bare`);
+    console.warn(`[pizza-eagle] no AGENTS.md in AGENT_DIR (${cfg.agentDir}) — running bare`);
   }
 
   const sessionsDir = `${cfg.stateDir}/sessions`;
