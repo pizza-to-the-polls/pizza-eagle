@@ -167,9 +167,11 @@ GitHub Actions can trigger the same via `ssm send-command`.
   read, S3 media read, `PizzaBaseReadOnly` Data API (`ptp_ro` = SELECT on
   all 14 tables — verified), Bugsnag readonly, gh, GA4 readonly (aggregate
   analytics, no PII — SA at `~/.config/ptp/ga-readonly.json`).
-- No DB write path exists for the bot. Mutating actions (filing issues,
-  dispatching dd-agent) are deliberately **out of scope for v1** — that's
-  the v1.5 confirmation-gate work.
+- No DB write path exists for the bot. The only mutating surface is P4's
+  scoped GitHub App: draft PRs on `polls.pizza`/`pizzabase` (human merge
+  mandatory — branch protection + author-can't-approve) and free publish to
+  the `hotnready` Pages sandbox. Credentials ride the per-invocation
+  injection rule. See SLACK_BOT_PLAN.md §10 P4.
 - Never post raw contact info or raw bucket paths to Slack — conventions
   live in `agent/AGENTS.md`.
 
