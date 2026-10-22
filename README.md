@@ -22,6 +22,7 @@ agent/AGENTS.md      operator context (copied into each case workdir)
 systemd/             pizza-eagle.service + nightly update timer + failure notifier
 scripts/bootstrap.sh cloud-init user-data (idempotent, EIP+DNS self-registration)
 scripts/ga.mjs       zero-dep GA4 query helper (readonly SA; report/realtime/accounts)
+scripts/gh-token.mjs GitHub App installation-token minter (pizza-eagle-agent; PEM from Secrets Manager; P4)
 manifest.json         Slack app manifest (name, bot user, scopes, Socket Mode)
 cloudformation/      pizza-eagle.yaml — DRAFT stack (review TODOs before deploy)
 ```
