@@ -9,7 +9,7 @@ set -euo pipefail
 
 #### Parameters (override via /etc/ptp-ops/bootstrap.env if present)
 PTP_BOT_HOME=/opt/ptp-bot
-PTP_BOT_REPO="https://github.com/pizza-to-the-polls/ptp-ops.git" # read-only over https on the box; updates are pull-based
+PTP_BOT_REPO="https://github.com/pizza-to-the-polls/pizza-eagle.git" # read-only over https on the box; updates are pull-based
 EIP_ALLOCATION_ID="TODO: eipalloc-..."                     # allocated by the CFN stack
 DNS_ZONE_ID="TODO: Route53 public hosted zone id"
 DNS_NAME="bastion.polls.pizza"

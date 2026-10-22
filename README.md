@@ -182,7 +182,7 @@ GitHub Actions can trigger the same via `ssm send-command`.
       Analytics Admin API in GCP project 115859449668 for self-discovery
 - [ ] Deploy params: `VpcId`, `SubnetId`, `BotSecretArn`, `BackupBucketName`
 - [ ] IAM: `ptp-ops-github-deploy` OIDC role for Actions (repo
-      pizza-to-the-polls/ptp-ops, ref main)
+      pizza-to-the-polls/pizza-eagle, ref main)
 - [ ] P4 (when ready): fine-grained PAT + branch protection on `main` of
       polls.pizza + pizzabase (branch protection is load-bearing)
 - [ ] Skills sync for the `ptp-bot` user (`~/.pi/agent/skills`)
