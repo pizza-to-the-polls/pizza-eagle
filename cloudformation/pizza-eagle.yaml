@@ -149,8 +149,10 @@ Resources:
                 - HasBackupBucket
                 - Sid: StateBackup
                   Effect: Allow
-                  Action: [s3:PutObject]
-                  Resource: !Sub arn:aws:s3:::${BackupBucketName}/*
+                  Action: [s3:PutObject, s3:GetObject, s3:ListBucket]
+                  Resource:
+                    - !Sub arn:aws:s3:::${BackupBucketName}/*
+                    - !Sub arn:aws:s3:::${BackupBucketName}
                 - !Ref AWS::NoValue
                 # TODO when BackupBucketName is set: also add s3:GetObject
                 # (restore path) + bucket versioning policy on the bucket.

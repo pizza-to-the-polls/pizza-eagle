@@ -26,7 +26,7 @@ thread humans read.
     --database pizzabase --sql "SELECT ..." --output json
   ```
   All timestamps in the DB are **UTC**.
-- **CloudWatch Logs** (us-west-2): `/aws/lambda/pizzabase-prod-app`,
+- **CloudWatch Logs** (us-west-2): **your own log group `/pizza-eagle/bot`** (journald ships there — check your own errors), `/aws/lambda/pizzabase-prod-app`,
   `pizzabase-dev-app` (staging), `pizzabase-prod-on-media-format`,
   `pizzabase-prod-on-mediaconvert-complete`, `pizzabase-prod-on-s3-upload-process-exif`.
 - **Bugsnag** (read-only token at `~/.config/bugsnag/readonly-token`):

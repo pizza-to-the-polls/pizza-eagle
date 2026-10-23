@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { loadConfig } from "./config.js";
 import { ThreadStore, workdirFor, type ThreadRecord } from "./store.js";
+import Bugsnag from "@bugsnag/js";
 import { editStatus, postFindings, postStatus, stripMention } from "./slack.js";
 import { InvestigationError, runInvestigation, activeInvestigations } from "./investigate.js";
 
@@ -42,6 +43,14 @@ class Queue {
       this.waiting.shift()?.();
     }
   }
+}
+
+function report(e: unknown): void {
+  // no-op until Bugsnag.start() ran (no key configured → local-only errors).
+  // Cast: @bugsnag/js's dual-mode .d.ts types mis-resolve under NodeNext;
+  // the runtime default export has .notify (verified by the Bugsnag smoke).
+  const bs = Bugsnag as unknown as { notify?: (e: unknown) => void };
+  try { bs.notify?.(e); } catch { /* not started */ }
 }
 
 async function main(): Promise<void> {
@@ -140,6 +149,7 @@ async function main(): Promise<void> {
         }
         await postFindings(slack, event.channel, threadTs, `:x: ${detail}`);
         console.error("[pizza-eagle] investigation failed:", e);
+      report(e);
       }
     });
   }
@@ -183,5 +193,6 @@ async function main(): Promise<void> {
 
 main().catch((e) => {
   console.error("[pizza-eagle] fatal:", e);
+  report(e);
   process.exit(1);
 });

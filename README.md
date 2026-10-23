@@ -178,6 +178,31 @@ Box updates are pull-based: nightly `pizza-eagle-update.timer` runs
 `git pull --ff-only && npm ci && npm run build && systemctl restart pizza-eagle`;
 GitHub Actions can trigger the same via `ssm send-command`.
 
+## Backups & restore
+
+Nightly (`pizza-eagle-backup.timer`) tars `state/` — sessions, case-history,
+thread map — to `s3://pizza-eagle-backups/state-<timestamp>.tgz`
+(versioned bucket, 180-day lifecycle). Restore drill (from the box, or any
+identity with s3:GetObject):
+
+```bash
+latest=$(aws s3 ls s3://pizza-eagle-backups/ | sort | tail -1 | awk '{print $4}')
+aws s3 cp "s3://pizza-eagle-backups/$latest" - | tar tzf - | head   # verify contents
+# full restore: stop the bot, extract over state/, restart
+sudo systemctl stop pizza-eagle
+aws s3 cp "s3://pizza-eagle-backups/$latest" - | tar xzf - -C /opt/pizza-eagle/state
+sudo systemctl start pizza-eagle
+```
+
+## Observability
+
+- **Bugsnag**: listener errors report to the PTP project (`BUGSNAG_KEY`) —
+  bot crashes sit next to app crashes.
+- **CloudWatch**: journald ships to `/pizza-eagle/bot` (cwagent); the agent
+  can read its own log group (it's in the AGENTS.md data sources).
+- **Slack alerts**: unit failures post to `SLACK_ALERT_CHANNEL` via the
+  bot token (webhook path still supported).
+
 ## Security boundary (read-only by construction)
 
 - The `pizza-eagle` OS user's only AWS identity is the instance role: logs
