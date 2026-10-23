@@ -1,0 +1,11 @@
+[Unit]
+Description=pizza-eagle daily health digest (probes + posts to ops channel)
+OnFailure=notify-failure@%n.service
+
+[Service]
+Type=oneshot
+User=pizza-eagle
+Group=pizza-eagle
+WorkingDirectory=/opt/pizza-eagle
+EnvironmentFile=/opt/pizza-eagle/.env
+ExecStart=/usr/bin/node /opt/pizza-eagle/scripts/self-check.mjs

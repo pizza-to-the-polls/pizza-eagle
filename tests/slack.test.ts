@@ -54,6 +54,13 @@ test("chunkMarkdown: long text chunks respect the limit and split on boundaries"
   );
 });
 
+test("mrkdwn: links are never styled — bold around/inside links is stripped", () => {
+  // deploy-day bug: bot wrote *<url>* → asterisks leaked into the rendered URL
+  assert.equal(toSlackMrkdwn("**https://hotnready.polls.pizza/guide/**"), "<https://hotnready.polls.pizza/guide/>");
+  assert.equal(toSlackMrkdwn("*[the guide](https://x.dev/g)*"), "<https://x.dev/g|the guide>");
+  assert.equal(toSlackMrkdwn("[**the guide**](https://x.dev/g)"), "<https://x.dev/g|the guide>");
+});
+
 test("mrkdwn: markdown tables become code blocks (Slack can't render pipes)", () => {
   const out = toSlackMrkdwn("Summary:\n| File | Change |\n|---|---|\n| a.ts | red → blue |\nDone");
   assert.ok(out.includes("```"), "table gets fenced");

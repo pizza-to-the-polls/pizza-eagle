@@ -36,7 +36,13 @@ export function toSlackMrkdwn(md: string): string {
         .replace(/^#{1,6}\s+(.+)$/gm, (_m, t) => `*${String(t).trim()}*`)
         .replace(/\*\*([^*\n]+)\*\*/g, (_m, t) => `*${t}*`)
         .replace(/\[([^\]\n]+)\]\((https?:[^)\s]+)\)/g, (_m, t, url) => `<${url}|${t}>`)
-        .replace(/^\s*[-*]\s+/gm, "• ");
+        .replace(/^\s*[-*]\s+/gm, "• ")
+        // Slack links can NOT be styled. Bold-wrapped bare URLs become real
+        // links; stray bold around links/labels is stripped. (Deploy-day
+        // report: "*<url>*" rendered the asterisks literally.)
+        .replace(/\*(https?:[^*\s]+)\*/g, "<$1>")
+        .replace(/\*<([^*\n]+)>\*/g, "<$1>")
+        .replace(/<([^|\n]+)\|([^>\n]*)>/g, (_m, u, t) => `<${u}|${t.replace(/\*/g, "")}>`);
     })
     .join("");
 }

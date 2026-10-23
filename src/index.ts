@@ -9,6 +9,7 @@
 import { SocketModeClient } from "@slack/socket-mode";
 import { WebClient } from "@slack/web-api";
 import { mkdirSync, writeFileSync } from "node:fs";
+import { execFile } from "node:child_process";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { loadConfig } from "./config.js";
@@ -207,6 +208,22 @@ async function main(): Promise<void> {
   socket.on("connected", () => console.log("[pizza-eagle] socket: connected"));
   socket.on("disconnect", () => console.log("[pizza-eagle] socket: DISCONNECTED"));
   socket.on("reconnecting", () => console.log("[pizza-eagle] socket: reconnecting…"));
+
+  // Liveness heartbeat: one CloudWatch datapoint every 5 minutes so an
+  // alarm on absence (stack: HeartbeatAlarm) catches a silently-dead
+  // process or hung socket — "systemd active" alone can lie.
+  const heartbeat = setInterval(() => {
+    execFile("aws", [
+      "cloudwatch", "put-metric-data",
+      "--namespace", "pizza-eagle",
+      "--metric-data", "MetricName=Heartbeat,Value=1",
+      "--region", "us-west-2",
+    ], (e) => {
+      if (e) console.warn("[pizza-eagle] heartbeat emit failed (will retry):", (e as Error).message);
+      else console.log("[pizza-eagle] heartbeat");
+    });
+  }, 5 * 60_000);
+  heartbeat.unref?.();
 
   await socket.start();
   console.log(

@@ -118,6 +118,8 @@ reader.
   `canvases.create` (bot token is in your env; pass title + markdown
   document) returns an access link — post that link in the thread reply.
   Canvas content stays in the workspace.
+- **Never style links** — Slack cannot bold a link; write
+  `*Important:* the guide at <URL>` not `*<URL>*`.
 - **Formatting is SLACK mrkdwn, not markdown:** *bold*, • bullets,
   `inline code`, ```code blocks```. **Never markdown tables** — Slack
   renders them as raw pipes. Multi-column data → bullets, or a ```

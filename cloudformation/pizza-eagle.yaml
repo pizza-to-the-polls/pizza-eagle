@@ -39,6 +39,10 @@ Parameters:
     Type: String
     Default: sg-0e176dd57d8b04bde
     Description: SG on the pizzabase Aurora cluster — bastion duty needs 5432 egress to it (Retool tunnel + human psql)
+  AlarmEmail:
+    Type: String
+    Default: ""
+    Description: Email for heartbeat/liveness alarms (a CloudWatch alarm fires when the bot stops emitting its 5-min heartbeat). Leave empty to create the alarm without notifications.
   BackupBucketName:
     Type: String
     Description: S3 bucket for nightly state backups (sessions/case history). Empty string disables the grant.
@@ -46,6 +50,7 @@ Parameters:
 
 Conditions:
   HasBackupBucket: !Not [!Equals [!Ref BackupBucketName, ""]]
+  HasAlarmEmail: !Not [!Equals [!Ref AlarmEmail, ""]]
 
 Resources:
   BotRole:
@@ -223,6 +228,34 @@ Resources:
             ENVEOF
             echo '@@BOOTSTRAP_B64@@' | base64 -d > /root/bootstrap.sh
             bash /root/bootstrap.sh
+
+  # Liveness: the bot emits a pizza-eagle/Heartbeat metric every 5 min
+  # (src/index.ts); this alarm fires when it goes silent — "systemd active"
+  # alone can't see a hung socket.
+  HeartbeatAlarmTopic:
+    Type: AWS::SNS::Topic
+    Condition: HasAlarmEmail
+  HeartbeatAlarmSub:
+    Type: AWS::SNS::Subscription
+    Condition: HasAlarmEmail
+    Properties:
+      TopicArn: !Ref HeartbeatAlarmTopic
+      Protocol: email
+      Endpoint: !Ref AlarmEmail
+  HeartbeatAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: pizza-eagle-heartbeat
+      AlarmDescription: pizza-eagle bot has not emitted a heartbeat in ~10 minutes — process hung or socket silently dead
+      Namespace: pizza-eagle
+      MetricName: Heartbeat
+      Period: 300
+      EvaluationPeriods: 2
+      Statistic: Sum
+      ComparisonOperator: LessThanThreshold
+      Threshold: 1
+      TreatMissingData: breaching
+      AlarmActions: !If [HasAlarmEmail, [!Ref HeartbeatAlarmTopic], !Ref "AWS::NoValue"]
 
   OpsASG:
     Type: AWS::AutoScaling::AutoScalingGroup
