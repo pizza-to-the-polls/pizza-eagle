@@ -1,64 +1,56 @@
 #!/usr/bin/env bash
 # pizza-psql — human console access to the pizzabase cluster.
 #
-# Retires the old-bastion pattern of a psql connection string living in
-# bash history: the credential is fetched from Secrets Manager with YOUR
-# identity (never the bot's instance role — the box deliberately has no
-# grant on this secret) and passed via PGPASSWORD, so it never appears in
-# argv, shell history, or any file on any server.
+# Retires the old-bastion pattern of a psql connection string in bash
+# history. The credential is fetched from Secrets Manager with YOUR
+# identity (the bot's instance role has no grant on it) and passed via
+# PGPASSWORD — never in argv, history, or any file on any server.
 #
-# Prereqs: aws CLI (your identity), jq, psql (brew install libpq).
-# Secret: PizzaBase (the app's own secret — user pizzabase/master; rotation updates this one)
-# Create it once (never paste the password into chat):
-#   aws secretsmanager create-secret --name pizzabase/admin \
-#     --secret-string '{"user":"pizzabase","password":"<NEW ROTATED PASSWORD>","dbname":"pizzabase"}'
+# Tunnel: ssh -L through the `ptp-ops` host config (SSM SSH session, no
+# inbound on the box) on local port 15432 — deliberately NOT 5432, which
+# a local dev Postgres would shadow.
 #
-# Usage: pizza-psql [-r ROLE] [psql args...]
-#   pizza-psql                     # admin console via SSM port-forward
-#   pizza-psql -r ptp_ro           # read-only role instead
+# Usage: pizza-psql [-s SECRET] [-r ROLE] [psql args…]
+#   pizza-psql                          # console as the app's DB user
+#   pizza-psql -c 'select 1'            # one-shot queries
+#   pizza-psql -r ptp_ro                # read-only role (same password secret)
 set -euo pipefail
 
-SECRET="PizzaBase" # the same secret the app (Data API) uses — one copy of the master password
+SECRET="PizzaBase"   # the app's own secret — one copy of the credential
 ROLE=""
 args=()
 while [ $# -gt 0 ]; do
   case "$1" in
-    -r|--role) ROLE="$2"; shift 2 ;;
+    -r|--role)   ROLE="$2"; shift 2 ;;
     -s|--secret) SECRET="$2"; shift 2 ;;
-    *) args+=("$1"); shift ;;
+    *)           args+=("$1"); shift ;;
   esac
 done
 
 HOST="pizzabase.cluster-c0xyw6eawjva.us-west-2.rds.amazonaws.com"
-PORT=5432
+LOCAL_PORT=15432
 
 CREDS=$(AWS_REGION=us-west-2 aws secretsmanager get-secret-value \
   --secret-id "$SECRET" --query SecretString --output text)
-if [ -n "$ROLE" ]; then
-  USER="$ROLE"
-  DB=$(jq -r '.dbname' <<<"$CREDS")
-  PASS=$(jq -r '.password' <<<"$CREDS")
-  echo "note: role override ($USER) — password from $SECRET must match that role" >&2
-else
-  USER=$(jq -r '.user' <<<"$CREDS")
-  DB=$(jq -r '.dbname' <<<"$CREDS")
-  PASS=$(jq -r '.password' <<<"$CREDS")
-fi
+USER=$(jq -r '.username // .user' <<<"$CREDS")
+DB=$(jq -r '.dbname // .dbClusterIdentifier // "pizzabase"' <<<"$CREDS")
+PASS=$(jq -r '.password' <<<"$CREDS")
 unset CREDS
+[ -n "$ROLE" ] && USER="$ROLE"
+if [ -z "$USER" ] || [ "$USER" = "null" ]; then
+  echo "FATAL: could not read username from secret $SECRET" >&2; exit 1
+fi
 
-# SSM port-forward through the pizza-eagle box (no inbound on the box,
-# no secrets on it — the tunnel egresses from your laptop via 443).
-AWS_REGION=us-west-2 aws ssm start-session \
-  --targets "Key=tag:Name,Values=pizza-eagle" \
-  --document-name AWS-StartPortForwardingSessionToRemoteSocket \
-  --parameters "host=${HOST},portNumber=${PORT}" &
+ssh -N -L "${LOCAL_PORT}:${HOST}:5432" ptp-ops &
 TUNNEL=$!
 trap 'kill $TUNNEL 2>/dev/null' EXIT
-echo "tunnel up (pid $TUNNEL); waiting for the local port…" >&2
+echo "tunnel up (pid $TUNNEL) on 127.0.0.1:${LOCAL_PORT}…" >&2
 
+ok=""
 for i in $(seq 1 15); do
-  nc -z localhost 5432 2>/dev/null && break
+  if nc -z 127.0.0.1 "$LOCAL_PORT" 2>/dev/null; then ok=1; break; fi
   sleep 1
 done
+[ -n "$ok" ] || { echo "FATAL: tunnel never opened 127.0.0.1:${LOCAL_PORT}" >&2; exit 1; }
 
-PGPASSWORD="$PASS" exec psql -h localhost -p 5432 -U "$USER" -d "$DB" "${args[@]}"
+PGPASSWORD="$PASS" exec psql -h 127.0.0.1 -p "$LOCAL_PORT" -U "$USER" -d "$DB" "${args[@]}"
