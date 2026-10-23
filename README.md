@@ -148,7 +148,7 @@ Host pizza-eagle
   HostName i-0…            # instance id (SSM target, not DNS)
   User duncombe
   IdentityFile ~/.ssh/id_ed25519
-  ProxyCommand sh -c "aws ssm start-session --target %h --document-name AWS-SSHSessionCommand"
+  ProxyCommand sh -c "aws ssm start-session --target %h --document-name AWS-StartSSHSession --parameters portNumber=%p"
 ```
 
   (needs `brew install --cask session-manager-plugin` locally)
