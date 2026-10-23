@@ -77,6 +77,17 @@ Resources:
                   - arn:aws:logs:us-west-2:320802729995:log-group:/aws/lambda/pizzabase-*
                   # the agent can read its OWN logs (observability: "check your errors")
                   - arn:aws:logs:us-west-2:320802729995:log-group:/pizza-eagle*
+              # Self-check probes + liveness heartbeat (scripts/self-check.mjs,
+              # src/index.ts heartbeat): put/read the pizza-eagle namespace,
+              # describe (never read) the bot's own secrets.
+              - Sid: LivenessProbes
+                Effect: Allow
+                Action:
+                  - cloudwatch:PutMetricData
+                  - cloudwatch:GetMetricStatistics
+                  - secretsmanager:DescribeSecret
+                  - secretsmanager:ListSecrets
+                Resource: "*"
               # CloudWatch agent ships journald → /pizza-eagle/bot
               - Sid: LogsWriteAgent
                 Effect: Allow

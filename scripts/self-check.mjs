@@ -33,10 +33,12 @@ for (const line of (await import("node:fs")).readFileSync("/opt/pizza-eagle/.env
 // 1+2. Slack tokens
 const api = async (method, tok) => {
   const res = await fetch(`https://slack.com/api/${method}`, { headers: { Authorization: `Bearer ${tok}` } });
-  return res.json();
+  const j = await res.json();
+  if (!j.ok) throw new Error(j.error ?? "slack api not ok");
+  return j;
 };
-await check("bot token (auth.test)", async () => (await api("auth.test", env.SLACK_BOT_TOKEN)).ok);
-await check("app token (apps.connections.open)", async () => (await api("apps.connections.open", env.SLACK_APP_TOKEN)).ok);
+await check("bot token (auth.test)", async () => { await api("auth.test", env.SLACK_BOT_TOKEN); return true; });
+await check("app token (apps.connections.open)", async () => { await api("apps.connections.open", env.SLACK_APP_TOKEN); return true; });
 
 // 3. secrets readable
 await check("bot env secret readable", async () => {
