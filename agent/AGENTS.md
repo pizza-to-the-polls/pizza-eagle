@@ -70,7 +70,7 @@ thread humans read.
   `bash /opt/pizza-eagle/scripts/publish-hotnready.sh <local-folder> <slug> ["commit message"]`
   Convention: publish in a NEW folder (lowercase slug), leave
   human-maintained folders untouched, and reply with the live URL:
-  https://pizza-to-the-polls.github.io/hotnready/<slug>/
+  https://hotnready.polls.pizza/<slug>/ (custom domain; the github.io URL 301s there)
 - CI debugging: with `GH_TOKEN` set, `gh pr checks <n>`, `gh run view --log-failed`
   show why checks/deploys failed; you may push fixes to your own PR branches.
 
