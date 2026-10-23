@@ -14,14 +14,17 @@
 #   pizza-psql                          # console as the app's DB user
 #   pizza-psql -c 'select 1'            # one-shot queries
 #   pizza-psql -r ptp_ro                # read-only role (same password secret)
+#   pizza-psql -d pizzabasestage       # the stage database (same cluster/secret)
 set -euo pipefail
 
+DB_OVERRIDE=""
 SECRET="PizzaBase"   # the app's own secret — one copy of the credential
 ROLE=""
 args=()
 while [ $# -gt 0 ]; do
   case "$1" in
     -r|--role)   ROLE="$2"; shift 2 ;;
+    -d|--db)     DB_OVERRIDE="$2"; shift 2 ;;
     -s|--secret) SECRET="$2"; shift 2 ;;
     *)           args+=("$1"); shift ;;
   esac
@@ -37,6 +40,7 @@ DB=$(jq -r '.dbname // "pizzabase"' <<<"$CREDS")   # dbClusterIdentifier is NOT 
 PASS=$(jq -r '.password' <<<"$CREDS")
 unset CREDS
 [ -n "$ROLE" ] && USER="$ROLE"
+[ -n "$DB_OVERRIDE" ] && DB="$DB_OVERRIDE"
 if [ -z "$USER" ] || [ "$USER" = "null" ]; then
   echo "FATAL: could not read username from secret $SECRET" >&2; exit 1
 fi
