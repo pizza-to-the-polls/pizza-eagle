@@ -33,7 +33,7 @@ LOCAL_PORT=15432
 CREDS=$(AWS_REGION=us-west-2 aws secretsmanager get-secret-value \
   --secret-id "$SECRET" --query SecretString --output text)
 USER=$(jq -r '.username // .user' <<<"$CREDS")
-DB=$(jq -r '.dbname // .dbClusterIdentifier // "pizzabase"' <<<"$CREDS")
+DB=$(jq -r '.dbname // "pizzabase"' <<<"$CREDS")   # dbClusterIdentifier is NOT a database name (it said database-1)
 PASS=$(jq -r '.password' <<<"$CREDS")
 unset CREDS
 [ -n "$ROLE" ] && USER="$ROLE"
