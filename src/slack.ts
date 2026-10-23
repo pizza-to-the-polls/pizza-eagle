@@ -67,6 +67,23 @@ export async function fetchThreadContext(
   );
 }
 
+/** Toggle an emoji reaction on a message. Never throws — it's cosmetic
+ * state (working/done), and a reaction failure must never fail a run. */
+export async function react(
+  client: WebClient,
+  channel: string,
+  ts: string,
+  emoji: string,
+  on: boolean,
+): Promise<void> {
+  try {
+    const args = { channel, timestamp: ts, name: emoji };
+    await (on ? client.reactions.add(args) : client.reactions.remove(args));
+  } catch (e) {
+    console.warn(`[pizza-eagle] reaction ${on ? "add" : "remove"} ${emoji} (cosmetic): ${(e as Error).message}`);
+  }
+}
+
 export function stripMention(text: string): string {
   // "<@U12345> why is upload 13280 orphaned?" -> "why is upload 13280 orphaned?"
   // IDs can contain digits + letters; tolerate a trailing colon/label forms.

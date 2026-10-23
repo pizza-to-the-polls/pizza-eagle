@@ -23,6 +23,7 @@
   },
   "scopes": [
     "channels:history",
-    "groups:history"
+    "groups:history",
+    "reactions:write"
   ]
 }

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chunkMarkdown, formatThreadMessages, stripMention, toSlackMrkdwn } from "../src/slack.js";
+import { chunkMarkdown, formatThreadMessages, react, stripMention, toSlackMrkdwn } from "../src/slack.js";
 
 test("mrkdwn: ATX headers become bold lines", () => {
   assert.equal(toSlackMrkdwn("## Report status\n### Details"), "*Report status*\n*Details*");
@@ -74,4 +74,25 @@ test("formatThreadMessages: readable transcript with @mentions resolved", () => 
   ]);
   assert.ok(out.includes("[17:30:33] U2ZLJ2KBP: hey @U0CAH280B6E what's up"), "user + mention resolved");
   assert.ok(out.includes("[17:36:40] pizza_eagle: checking"), "bot lines included");
+});
+
+test("react: add/remove calls, errors swallowed", async () => {
+  const calls: string[] = [];
+  const fake = {
+    reactions: {
+      add: async (a: Record<string, unknown>) => { calls.push(`add:${a.name}:${a.timestamp}`); },
+      remove: async (a: Record<string, unknown>) => { calls.push(`remove:${a.name}`); },
+    },
+  } as unknown as import("../src/slack.js").WebClient;
+  await react(fake, "C1", "123.456", "eyes", true);
+  await react(fake, "C1", "123.456", "eyes", false);
+  assert.deepEqual(calls, ["add:eyes:123.456", "remove:eyes"]);
+  // a failing reaction must never throw
+  const broken = {
+    reactions: {
+      add: async () => { throw new Error("nope"); },
+      remove: async () => { throw new Error("nope"); },
+    },
+  } as unknown as import("../src/slack.js").WebClient;
+  await react(broken, "C1", "1", "eyes", true); // no throw = pass
 });
