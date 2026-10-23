@@ -31,7 +31,14 @@ while [ $# -gt 0 ]; do
 done
 
 HOST="pizzabase.cluster-c0xyw6eawjva.us-west-2.rds.amazonaws.com"
-LOCAL_PORT=15432
+# Pick the first free port in this range: concurrent pizza-psql sessions
+# (prod + stage side by side) each get their own; a stale tunnel from a
+# crashed run is bypassed and dies on its own SSM idle timeout.
+LOCAL_PORT=""
+for p in $(seq 15432 15481); do
+  if ! nc -z 127.0.0.1 "$p" 2>/dev/null; then LOCAL_PORT=$p; break; fi
+done
+[ -n "$LOCAL_PORT" ] || { echo "FATAL: no free local port in 15432-15481" >&2; exit 1; }
 
 CREDS=$(AWS_REGION=us-west-2 aws secretsmanager get-secret-value \
   --secret-id "$SECRET" --query SecretString --output text)
@@ -45,7 +52,7 @@ if [ -z "$USER" ] || [ "$USER" = "null" ]; then
   echo "FATAL: could not read username from secret $SECRET" >&2; exit 1
 fi
 
-ssh -N -L "${LOCAL_PORT}:${HOST}:5432" ptp-ops &
+ssh -o LogLevel=Error -N -L "${LOCAL_PORT}:${HOST}:5432" ptp-ops &
 TUNNEL=$!
 trap 'kill $TUNNEL 2>/dev/null' EXIT
 echo "tunnel up (pid $TUNNEL) on 127.0.0.1:${LOCAL_PORT}…" >&2
