@@ -103,7 +103,10 @@ Resources:
                 # bot env secret or its own secret — same prefix.
                 Resource:
                   - !Ref BotSecretArn
-                  - !Sub arn:aws:secretsmanager:us-west-2:320802729995:secret:${BotSecretsPrefix}-*
+                  # slash-glob, NOT hyphen-glob: secret NAMES are prefix/env
+                  # etc. — the hyphen form (${BotSecretsPrefix}-*) matches
+                  # nothing because names continue with '/' not '-'
+                  - !Sub arn:aws:secretsmanager:us-west-2:320802729995:secret:${BotSecretsPrefix}/*
               # Data API access for investigations — the core tool. Same
               # grants the manual ptp-agent profile has (the working setup
               # this scaffold was developed against). The caller needs BOTH:

@@ -1,0 +1,124 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "LogsRead",
+      "Effect": "Allow",
+      "Action": [
+        "logs:DescribeLogGroups",
+        "logs:DescribeLogStreams",
+        "logs:GetLogEvents",
+        "logs:FilterLogEvents"
+      ],
+      "Resource": [
+        "arn:aws:logs:us-west-2:320802729995:log-group:/aws/lambda/pizzabase-*",
+        "arn:aws:logs:us-west-2:320802729995:log-group:/aws/lambda/pizzabase-*:*"
+      ]
+    },
+    {
+      "Sid": "S3MediaRead",
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket",
+        "s3:GetObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::raw.polls.pizza",
+        "arn:aws:s3:::raw.polls.pizza/*",
+        "arn:aws:s3:::raw-prod.polls.pizza",
+        "arn:aws:s3:::raw-prod.polls.pizza/*",
+        "arn:aws:s3:::reports.polls.pizza",
+        "arn:aws:s3:::reports.polls.pizza/*",
+        "arn:aws:s3:::scrubbed-uploads",
+        "arn:aws:s3:::scrubbed-uploads/*",
+        "arn:aws:s3:::processed-uploads",
+        "arn:aws:s3:::processed-uploads/*"
+      ]
+    },
+    {
+      "Sid": "MediaConvertRead",
+      "Effect": "Allow",
+      "Action": [
+        "mediaconvert:GetJob",
+        "mediaconvert:ListJobs",
+        "mediaconvert:DescribeEndpoints"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "EventsRead",
+      "Effect": "Allow",
+      "Action": [
+        "events:ListRules",
+        "events:DescribeRule",
+        "events:ListTargetsByRule"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "LambdaRead",
+      "Effect": "Allow",
+      "Action": [
+        "lambda:ListFunctions",
+        "lambda:GetFunction",
+        "lambda:ListLayers",
+        "lambda:GetLayerVersion",
+        "lambda:ListLayerVersions"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "CloudFormationRead",
+      "Effect": "Allow",
+      "Action": [
+        "cloudformation:DescribeStacks",
+        "cloudformation:DescribeStackEvents",
+        "cloudformation:DescribeChangeSet",
+        "cloudformation:ListStacks",
+        "cloudformation:ValidateTemplate"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "SecretsMetadata",
+      "Effect": "Allow",
+      "Action": [
+        "secretsmanager:ListSecrets",
+        "secretsmanager:DescribeSecret"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "DbCredsRead",
+      "Effect": "Allow",
+      "Action": [
+        "secretsmanager:GetSecretValue"
+      ],
+      "Resource": "arn:aws:secretsmanager:us-west-2:320802729995:secret:PizzaBaseReadOnly-*"
+    },
+    {
+      "Sid": "PizzaEagleAppSecrets",
+      "Effect": "Allow",
+      "Action": [
+        "secretsmanager:GetSecretValue"
+      ],
+      "Resource": "arn:aws:secretsmanager:us-west-2:320802729995:secret:ptp/prod/pizza-eagle/*"
+    },
+    {
+      "Sid": "RdsDataExecute",
+      "Effect": "Allow",
+      "Action": [
+        "rds-data:ExecuteStatement"
+      ],
+      "Resource": "arn:aws:rds:us-west-2:320802729995:cluster:pizzabase"
+    },
+    {
+      "Sid": "StsIdentity",
+      "Effect": "Allow",
+      "Action": [
+        "sts:GetCallerIdentity"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
