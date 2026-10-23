@@ -24,6 +24,8 @@
   "scopes": [
     "channels:history",
     "groups:history",
-    "reactions:write"
+    "reactions:write",
+    "canvases:read",
+    "canvases:write"
   ]
 }

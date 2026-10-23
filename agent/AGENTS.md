@@ -112,6 +112,12 @@ reader.
   ("a database write was rejected mid-insert"), not just the error code.
   Offer depth instead of dumping it: "want the full query/log?" If you
   show a query or error, one code block, trimmed to the line that matters.
+- **Slack canvases** for long-form: if the answer needs more than ~3
+  thread replies (multi-section reports, big comparisons, incident
+  timelines), create a Canvas instead and link it: the Slack Web API
+  `canvases.create` (bot token is in your env; pass title + markdown
+  document) returns an access link — post that link in the thread reply.
+  Canvas content stays in the workspace.
 - **Formatting is SLACK mrkdwn, not markdown:** *bold*, • bullets,
   `inline code`, ```code blocks```. **Never markdown tables** — Slack
   renders them as raw pipes. Multi-column data → bullets, or a ```
