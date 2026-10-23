@@ -77,7 +77,7 @@ jobs:
             --document-name "AWS-RunShellScript" \
             --targets "Key=tag:${INSTANCE_TAG_KEY},Values=${INSTANCE_TAG_VALUE}" \
             --comment "pizza-eagle immediate update (same as nightly timer)" \
-            --parameters 'commands=["git -C /opt/pizza-eagle pull --ff-only","npm --prefix /opt/pizza-eagle ci --omit=dev","npm --prefix /opt/pizza-eagle run build","systemctl restart pizza-eagle.service","systemctl is-active pizza-eagle.service"]'
+            --parameters 'commands=["git -C /opt/pizza-eagle pull --ff-only","dnf update -y nodejs","npm --prefix /opt/pizza-eagle ci --omit=dev","npm --prefix /opt/pizza-eagle run build","systemctl restart pizza-eagle.service","systemctl is-active pizza-eagle.service"]'
 
       - name: Report
         if: always()
