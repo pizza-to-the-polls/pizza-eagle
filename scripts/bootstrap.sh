@@ -180,8 +180,18 @@ install -m 644 "$PTP_BOT_HOME/systemd/notify-failure@.service" \
 systemctl daemon-reload
 systemctl enable --now pizza-eagle.service pizza-eagle-update.timer pizza-eagle-backup.timer
 
-#### 10. CloudWatch agent — journald → /pizza-eagle/bot (box logs are
+#### 10. CloudWatch agent — bot.log → /pizza-eagle/bot (box logs are
 #### searchable in AWS, and the agent can read its own log group)
+install -d -o pizza-eagle -g pizza-eagle -m 755 /var/log/pizza-eagle
+cat > /etc/logrotate.d/pizza-eagle <<'ROTATE'
+/var/log/pizza-eagle/bot.log {
+  weekly
+  rotate 4
+  compress
+  missingok
+  notifempty
+}
+ROTATE
 install -m 644 "$PTP_BOT_HOME/cloudwatch/agent.json" \
   /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
 # enable alone doesn't load the config — fetch-config does (learned live)

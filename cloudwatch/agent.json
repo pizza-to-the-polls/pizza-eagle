@@ -2,17 +2,13 @@
   "agent": { "region": "us-west-2", "metrics_collection_interval": 60 },
   "logs": {
     "logs_collected": {
-      "journald": {
+      "files": {
         "collect_list": [
           {
-            "event_source": "pizza-eagle.service",
+            "file_path": "/var/log/pizza-eagle/bot.log",
             "log_group_name": "/pizza-eagle/bot",
-            "log_stream_name": "{hostname}"
-          },
-          {
-            "event_source": "pizza-eagle-backup.service",
-            "log_group_name": "/pizza-eagle/bot",
-            "log_stream_name": "{hostname}-backup"
+            "log_stream_name": "{hostname}",
+            "timestamp_format": "%b %d %H:%M:%S"
           }
         ]
       }

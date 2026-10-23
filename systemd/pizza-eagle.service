@@ -13,6 +13,10 @@ WorkingDirectory=/opt/pizza-eagle
 # Populated by bootstrap.sh from Secrets Manager (Slack tokens etc.)
 EnvironmentFile=/opt/pizza-eagle/.env
 ExecStart=/usr/bin/node dist/index.js
+# Logs to file for the CloudWatch agent's files collector (journald input
+# schema proved version-fragile); journald still records unit lifecycle.
+StandardOutput=append:/var/log/pizza-eagle/bot.log
+StandardError=append:/var/log/pizza-eagle/bot.log
 Restart=always
 RestartSec=10
 # Hardening
@@ -21,7 +25,7 @@ PrivateTmp=true
 ProtectSystem=strict
 # pi writes locks/state under ~/.pi/agent — the bot user's home must be
 # writable despite ProtectHome=read-only (ReadWritePaths overrides it)
-ReadWritePaths=/opt/pizza-eagle/state /home/pizza-eagle
+ReadWritePaths=/opt/pizza-eagle/state /home/pizza-eagle /var/log/pizza-eagle
 ProtectHome=read-only
 [Install]
 WantedBy=multi-user.target
