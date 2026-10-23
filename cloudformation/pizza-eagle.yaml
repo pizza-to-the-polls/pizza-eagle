@@ -35,6 +35,10 @@ Parameters:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
     Description: SSM public parameter — CloudFormation resolves at deploy time (no IAM needed)
+  RdsSecurityGroupId:
+    Type: String
+    Default: sg-0e176dd57d8b04bde
+    Description: SG on the pizzabase Aurora cluster — bastion duty needs 5432 egress to it (Retool tunnel + human psql)
   BackupBucketName:
     Type: String
     Description: S3 bucket for nightly state backups (sessions/case history). Empty string disables the grant.
@@ -163,6 +167,10 @@ Resources:
           FromPort: 443
           ToPort: 443
           CidrIp: 0.0.0.0/0 # bot (wss), SSM, Data API, model API, gh, updates
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref RdsSecurityGroupId # bastion duty: Retool tunnel + human psql
       SecurityGroupIngress:
         # Retool tunnel (port 22). CIDRs from
         # docs.retool.com/data-sources/reference/ip-allowlist-cloud-orgs
