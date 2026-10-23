@@ -60,7 +60,7 @@ function loadSA() {
   return sa;
 }
 
-const b64url = (buf) =>
+export const b64url = (buf) =>
   Buffer.from(buf).toString("base64")
     .replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
 
@@ -94,7 +94,7 @@ async function getToken(sa) {
 }
 
 /** argv like ["report","--dim","country","--limit","10"] → {cmd, flags} */
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const cmd = argv[0];
   const flags = {};
   for (let i = 1; i < argv.length; i++) {
@@ -114,7 +114,7 @@ function parseArgs(argv) {
   return { cmd, flags };
 }
 
-function resolveDate(spec) {
+export function resolveDate(spec) {
   if (!spec) return undefined;
   if (spec === "today") return new Date().toISOString().slice(0, 10);
   const rel = spec.match(/^(\d+)d$/);
@@ -130,7 +130,7 @@ function resolveDate(spec) {
 }
 
 /** "country=US" / "country=US,CA" → a dimension filter */
-function dimensionFilter(spec) {
+export function dimensionFilter(spec) {
   const eq = spec.indexOf("=");
   if (eq < 1) {
     console.error(`bad --filter "${spec}" (want name=value)`);
@@ -221,4 +221,8 @@ async function main() {
   usage();
 }
 
-await main();
+import { pathToFileURL } from "node:url";
+// Run only when executed directly (not when imported by the test suite)
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await main();
+}

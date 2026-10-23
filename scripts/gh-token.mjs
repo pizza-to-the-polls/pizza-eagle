@@ -24,11 +24,11 @@ import { createSign } from "node:crypto";
 const API = "https://api.github.com";
 const PEM_SECRET = "ptp/prod/pizza-eagle/gh-app-key";
 
-const b64url = (buf) =>
+export const b64url = (buf) =>
   Buffer.from(buf).toString("base64")
     .replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
 
-function appJwt(pem, appId) {
+export function appJwt(pem, appId) {
   const header = b64url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
   const now = Math.floor(Date.now() / 1000);
   const claims = b64url(JSON.stringify({
@@ -104,4 +104,8 @@ async function main() {
   process.stdout.write(tok.token);
 }
 
-await main();
+import { pathToFileURL } from "node:url";
+// Run only when executed directly (not when imported by the test suite)
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await main();
+}

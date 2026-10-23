@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "pizza-eagle \u2014 Slack front-end around a pi agent session for PTP ops investigations",
-  "type": "commonjs",
+  "type": "module",
   "main": "dist/index.js",
   "engines": {
     "node": ">=24.22.1"
@@ -16,7 +16,8 @@
     "check:slack": "tsx scripts/check-slack.ts",
     "backup": "tar czf - -C \"${BOT_STATE_DIR:-./state}\" . | aws s3 cp - \"s3://${BOT_BACKUP_BUCKET:-pizza-eagle-backups}/state-$(date +%Y%m%d-%H%M).tgz\"",
     "dev": "tsx src/index.ts",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "test": "node --import tsx --test tests/"
   },
   "dependencies": {
     "@slack/socket-mode": "^2.0.0",

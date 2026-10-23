@@ -24,8 +24,24 @@ scripts/bootstrap.sh cloud-init user-data (idempotent, EIP+DNS self-registration
 scripts/ga.mjs       zero-dep GA4 query helper (readonly SA; report/realtime/accounts)
 scripts/gh-token.mjs GitHub App installation-token minter (pizza-eagle-agent; PEM from Secrets Manager; P4)
 manifest.json         Slack app manifest (name, bot user, scopes, Socket Mode)
-cloudformation/      pizza-eagle.yaml — DRAFT stack (review TODOs before deploy)
+cloudformation/      pizza-eagle.yaml — the ops-box stack
+tests/               unit tests (node:test, zero new deps)
+.github/workflows/    test.yml (every push/PR) + deploy.yml (template/bootstrap changes)
 ```
+
+## Tests
+
+```bash
+npm run check   # tsc --noEmit (also runs in CI)
+npm test        # unit suite: node:test via tsx — slack mrkdwn/chunking, config
+                # validation, thread store, ga.mjs/gh-token.mjs pure helpers
+                # (incl. real RS256 JWT verification with a generated key)
+npm run smoke   # integration incl. live pi roundtrip — manual, needs .env
+```
+
+CI (`.github/workflows/test.yml`) runs check + test on every push and PR.
+Make it a **required status check** in branch protection so pizza-eagle-agent
+PRs can't merge red.
 
 ## How a mention flows
 
