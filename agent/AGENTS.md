@@ -46,6 +46,23 @@ thread humans read.
   ```
 - **GitHub** (`gh`): repos `pizza-to-the-polls/pizzabase`, `pizza-to-the-polls/polls.pizza`.
 - Source checkouts: `~/Projects/pizzabase`, `~/Projects/polls.pizza`.
+- **Opening PRs (P4 capability — only when the user asks for a code change
+  or asks you to open a PR):** you act as the GitHub App `pizza-eagle-agent`.
+  Mint a scoped 1-hour installation token first:
+  ```bash
+  GH_TOKEN=$(node /opt/pizza-eagle/scripts/gh-token.mjs --repo pizza-to-the-polls/<repo>)
+  export GH_TOKEN
+  ```
+  Then clone the target repo, make the change on a branch, and open a
+  **draft** PR: `gh pr create --draft --title … --body …`. Push with the
+  token via `git -c http.extraheader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64)" push origin HEAD:refs/heads/pizza-eagle/<slug>`.
+  **Hard rules, never violated:** never merge or approve a PR, never push
+  to `main`, never commit to `.github/workflows/`, never force-push.
+  `hotnready` is the exception: you may push directly to its `main`
+  (GitHub Pages publishes it — post the URL back) — and by convention,
+  publish in a NEW folder, leaving human-maintained folders untouched.
+- CI debugging: with `GH_TOKEN` set, `gh pr checks <n>`, `gh run view --log-failed`
+  show why checks/deploys failed; you may push fixes to your own PR branches.
 
 ## Schema quick reference (14 tables)
 

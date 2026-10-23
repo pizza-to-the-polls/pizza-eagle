@@ -68,6 +68,18 @@ else
   rm -f /home/pizza-eagle/.config/ptp/ga-readonly.json.tmp
 fi
 
+#### 5c. Bugsnag read-only token — investigations data source
+install -d -o pizza-eagle -g pizza-eagle -m 700 /home/pizza-eagle/.config /home/pizza-eagle/.config/bugsnag
+if aws secretsmanager get-secret-value --secret-id "${SECRETS_PREFIX}/bugsnag-token" \
+     --query SecretString --output text > /home/pizza-eagle/.config/bugsnag/readonly-token.tmp 2>/dev/null; then
+  mv /home/pizza-eagle/.config/bugsnag/readonly-token.tmp /home/pizza-eagle/.config/bugsnag/readonly-token
+  chown pizza-eagle:pizza-eagle /home/pizza-eagle/.config/bugsnag/readonly-token
+  chmod 600 /home/pizza-eagle/.config/bugsnag/readonly-token
+else
+  echo "WARN: secret ${SECRETS_PREFIX}/bugsnag-token not found — Bugsnag checks disabled" >&2
+  rm -f /home/pizza-eagle/.config/bugsnag/readonly-token.tmp
+fi
+
 #### 6. Operator context + skills for the bot user
 install -d -o pizza-eagle -g pizza-eagle -m 755 /opt/pizza-eagle/state
 install -o pizza-eagle -g pizza-eagle -m 644 "$PTP_BOT_HOME/agent/AGENTS.md" \
