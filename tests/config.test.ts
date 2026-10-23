@@ -57,6 +57,15 @@ test("loadConfig: rejects wrong token types", () => {
   assert.throws(() => loadConfig({ ...validEnv, SLACK_BOT_TOKEN: "xapp-wrong" } as NodeJS.ProcessEnv), /bot token/);
 });
 
+test("loadConfig: absent allowlists mean open access (empty sets)", () => {
+  const cfg = loadConfig({
+    SLACK_APP_TOKEN: "xapp-1-A0TEST-123-abcdef",
+    SLACK_BOT_TOKEN: "xoxb-102285951-123-KOxTest",
+  } as NodeJS.ProcessEnv);
+  assert.equal(cfg.allowedChannels.size, 0);
+  assert.equal(cfg.allowedUsers.size, 0);
+});
+
 test("loadConfig: missing required vars throw", () => {
   assert.throws(() => loadConfig({ SLACK_BOT_TOKEN: "xoxb-1" } as NodeJS.ProcessEnv), /Missing required env var/);
 });

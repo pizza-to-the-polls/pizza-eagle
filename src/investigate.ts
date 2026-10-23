@@ -42,7 +42,7 @@ export const activeInvestigations = new Set<ReturnType<typeof spawn>>();
 
 export async function runInvestigation(
   cfg: Config,
-  opts: { question: string; sessionId: string; workdir: string },
+  opts: { question: string; sessionId: string; workdir: string; requester?: string },
 ): Promise<InvestigationResult> {
   mkdirSync(opts.workdir, { recursive: true });
 
@@ -100,14 +100,14 @@ export async function runInvestigation(
   const answer = stdout.trim();
 
   if (timedOut) {
-    appendHistory(opts.workdir, opts.question, "(timed out)");
+    appendHistory(opts.workdir, opts.question, "(timed out)", opts.requester);
     throw new InvestigationError(
       `Investigation exceeded ${Math.round(cfg.timeoutMs / 60_000)} minutes and was stopped.`,
       stderr,
     );
   }
   if (code !== 0 || !answer) {
-    appendHistory(opts.workdir, opts.question, answer || "(no output)");
+    appendHistory(opts.workdir, opts.question, answer || "(no output)", opts.requester);
     const tail = stderr.trim().slice(-800);
     throw new InvestigationError(
       `pi exited with code ${code ?? "?"}${signal ? ` (${signal})` : ""}.`,
@@ -115,16 +115,27 @@ export async function runInvestigation(
     );
   }
 
-  appendHistory(opts.workdir, opts.question, answer);
+  appendHistory(opts.workdir, opts.question, answer, opts.requester);
   return { answer, durationMs };
 }
 
-/** Durable per-thread case file — cheap context even if the session id breaks. */
-function appendHistory(workdir: string, question: string, answer: string): void {
+/**
+ * Durable per-thread case file — cheap context even if the session id breaks.
+ * The requester's Slack member id rides along so AGENTS.md can gate
+ * write-powers (PRs, hotnready publishes) to vetted humans while
+ * investigations stay open to the whole workspace.
+ */
+export function appendHistory(
+  workdir: string,
+  question: string,
+  answer: string,
+  requester?: string,
+): void {
   const stamp = new Date().toISOString();
+  const who = requester ? `\n**Requester:** Slack member \`${requester}\`\n` : "\n";
   appendFileSync(
     `${workdir}/case-history.md`,
-    `## ${stamp}\n\n**Q:** ${question}\n\n${answer}\n\n---\n\n`,
+    `## ${stamp}\n${who}**Q:** ${question}\n\n${answer}\n\n---\n\n`,
   );
 }
 

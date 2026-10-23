@@ -117,6 +117,7 @@ async function main(): Promise<void> {
           question,
           sessionId: record.sessionId,
           workdir: record.workdir,
+          requester: event.user,
         });
         if (statusTs) {
           await editStatus(slack, event.channel, statusTs, ":white_check_mark: Investigation finished.");
