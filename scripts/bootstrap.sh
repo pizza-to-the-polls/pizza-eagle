@@ -77,6 +77,24 @@ install -o pizza-eagle -g pizza-eagle -m 644 "$PTP_BOT_HOME/agent/AGENTS.md" \
 install -d -o pizza-eagle -g pizza-eagle /home/pizza-eagle/.pi/agent/skills
 # TODO: rsync -a "$PTP_BOT_HOME/skills/" /home/pizza-eagle/.pi/agent/skills/
 
+#### 6b. pi config for the bot user (models/settings from Secrets Manager).
+# pi-config secret holds a SANITIZED models.json — or-pizza provider ONLY
+# (env-keyed via OPENROUTER_KEY_PIZZA; the personal provider must never
+# reach this box) — plus settings.json defaults. Fails soft: pi errors
+# visibly without it.
+if aws secretsmanager get-secret-value --secret-id "${SECRETS_PREFIX}/pi-config" \
+     --query SecretString --output text > /tmp/pi-config.json 2>/dev/null; then
+  install -d -o pizza-eagle -g pizza-eagle -m 700 /home/pizza-eagle/.pi /home/pizza-eagle/.pi/agent
+  jq -r 'to_entries[] | .key' /tmp/pi-config.json | while read -r f; do
+    jq --arg f "$f" '.[$f]' /tmp/pi-config.json > "/home/pizza-eagle/.pi/agent/$f"
+    chown pizza-eagle:pizza-eagle "/home/pizza-eagle/.pi/agent/$f"
+    chmod 600 "/home/pizza-eagle/.pi/agent/$f"
+  done
+  rm -f /tmp/pi-config.json
+else
+  echo "WARN: secret ${SECRETS_PREFIX}/pi-config not found — pi has no provider auth" >&2
+fi
+
 #### 7. Retool tunnel user (Retool Cloud dials in as this, no shell)
 id -u retool &>/dev/null || useradd -r -m -s /usr/sbin/nologin retool
 install -d -o retool -g retool -m 700 /home/retool/.ssh

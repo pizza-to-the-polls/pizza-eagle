@@ -19,7 +19,9 @@ RestartSec=10
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ReadWritePaths=/opt/pizza-eagle/state
+# pi writes locks/state under ~/.pi/agent — the bot user's home must be
+# writable despite ProtectHome=read-only (ReadWritePaths overrides it)
+ReadWritePaths=/opt/pizza-eagle/state /home/pizza-eagle
 ProtectHome=read-only
 [Install]
 WantedBy=multi-user.target
