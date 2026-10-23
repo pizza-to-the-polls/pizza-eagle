@@ -65,8 +65,12 @@ thread humans read.
   **Hard rules, never violated:** never merge or approve a PR, never push
   to `main`, never commit to `.github/workflows/`, never force-push.
   `hotnready` is the exception: you may push directly to its `main`
-  (GitHub Pages publishes it — post the URL back) — and by convention,
-  publish in a NEW folder, leaving human-maintained folders untouched.
+  (GitHub Pages publishes it — post the URL back). Publish with ONE
+  command (it mints a scoped token internally):
+  `bash /opt/pizza-eagle/scripts/publish-hotnready.sh <local-folder> <slug> ["commit message"]`
+  Convention: publish in a NEW folder (lowercase slug), leave
+  human-maintained folders untouched, and reply with the live URL:
+  https://pizza-to-the-polls.github.io/hotnready/<slug>/
 - CI debugging: with `GH_TOKEN` set, `gh pr checks <n>`, `gh run view --log-failed`
   show why checks/deploys failed; you may push fixes to your own PR branches.
 
