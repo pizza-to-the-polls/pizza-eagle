@@ -22,3 +22,7 @@ jobs:
         run: npm run check
       - name: Unit tests (node:test)
         run: npm test
+      - name: Build + import the emitted artifact (CJS/ESM drift check)
+        run: |
+          npm run build
+          node -e "import('./dist/slack.js').then(m => { if (typeof m.toSlackMrkdwn !== 'function') { throw new Error('dist artifact did not import as a working ES module'); } console.log('dist imports OK'); })"
