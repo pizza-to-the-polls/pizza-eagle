@@ -87,7 +87,16 @@ install -o pizza-eagle -g pizza-eagle -m 644 "$PTP_BOT_HOME/agent/AGENTS.md" \
 # Skills (triage, agent-status, ...) — copied once by provisioning, then
 # ride the repo via the update timer:
 install -d -o pizza-eagle -g pizza-eagle /home/pizza-eagle/.pi/agent/skills
-# TODO: rsync -a "$PTP_BOT_HOME/skills/" /home/pizza-eagle/.pi/agent/skills/
+# Skills ride the repo: each skills/<name>/SKILL.md installs into the bot
+# user's pi skill directory (updates arrive with the nightly git pull).
+if [ -d "$PTP_BOT_HOME/skills" ]; then
+  for d in "$PTP_BOT_HOME/skills"/*/; do
+    [ -f "${d}SKILL.md" ] || continue
+    sname=$(basename "$d")
+    install -d -o pizza-eagle -g pizza-eagle -m 755 "/home/pizza-eagle/.pi/agent/skills/$sname"
+    install -o pizza-eagle -g pizza-eagle -m 644 "${d}SKILL.md" "/home/pizza-eagle/.pi/agent/skills/$sname/SKILL.md"
+  done
+fi
 
 #### 6b. pi config for the bot user (models/settings from Secrets Manager).
 # pi-config secret holds a SANITIZED models.json — or-pizza provider ONLY
