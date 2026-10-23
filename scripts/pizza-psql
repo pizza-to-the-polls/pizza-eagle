@@ -8,7 +8,7 @@
 # argv, shell history, or any file on any server.
 #
 # Prereqs: aws CLI (your identity), jq, psql (brew install libpq).
-# Secret:  pizzabase/admin = {"user": "...", "password": "...", "dbname": "pizzabase"}
+# Secret: PizzaBase (the app's own secret — user pizzabase/master; rotation updates this one)
 # Create it once (never paste the password into chat):
 #   aws secretsmanager create-secret --name pizzabase/admin \
 #     --secret-string '{"user":"pizzabase","password":"<NEW ROTATED PASSWORD>","dbname":"pizzabase"}'
@@ -18,7 +18,7 @@
 #   pizza-psql -r ptp_ro           # read-only role instead
 set -euo pipefail
 
-SECRET="pizzabase/admin"
+SECRET="PizzaBase" # the same secret the app (Data API) uses — one copy of the master password
 ROLE=""
 args=()
 while [ $# -gt 0 ]; do
