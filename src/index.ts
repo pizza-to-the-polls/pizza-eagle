@@ -133,10 +133,10 @@ async function main(): Promise<void> {
 
     void queue.run(async () => {
       if (shuttingDown) return;
-      // 👀 on the thread parent while we're working; removed when done
+      // :pizza-eagle-working: on the thread parent while we're working; removed when done
       // (success or failure) — a visible "in progress" marker next to the
       // message itself, independent of the status reply below.
-      await react(slack, event.channel, threadTs, "eyes", true);
+      await react(slack, event.channel, threadTs, "pizza-eagle-working", true);
       try {
         if (threadContext) {
           // refresh on every run so follow-ups see the newest replies
@@ -171,8 +171,8 @@ async function main(): Promise<void> {
         console.error("[pizza-eagle] investigation failed:", e);
         report(e);
       } finally {
-        // 👀 off when done — success OR failure
-        await react(slack, event.channel, threadTs, "eyes", false);
+        // :pizza-eagle-working: off when done — success OR failure
+        await react(slack, event.channel, threadTs, "pizza-eagle-working", false);
       }
     });
   }

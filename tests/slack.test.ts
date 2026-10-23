@@ -84,8 +84,8 @@ test("react: add/remove calls, errors swallowed", async () => {
       remove: async (a: Record<string, unknown>) => { calls.push(`remove:${a.name}`); },
     },
   } as unknown as import("../src/slack.js").WebClient;
-  await react(fake, "C1", "123.456", "eyes", true);
-  await react(fake, "C1", "123.456", "eyes", false);
+  await react(fake, "C1", "123.456", "pizza-eagle-working", true);
+  await react(fake, "C1", "123.456", "pizza-eagle-working", false);
   assert.deepEqual(calls, ["add:eyes:123.456", "remove:eyes"]);
   // a failing reaction must never throw
   const broken = {
@@ -94,5 +94,5 @@ test("react: add/remove calls, errors swallowed", async () => {
       remove: async () => { throw new Error("nope"); },
     },
   } as unknown as import("../src/slack.js").WebClient;
-  await react(broken, "C1", "1", "eyes", true); // no throw = pass
+  await react(broken, "C1", "1", "pizza-eagle-working", true); // no throw = pass
 });
