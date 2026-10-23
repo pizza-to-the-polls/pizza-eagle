@@ -18,11 +18,12 @@ ADMIN_USER="duncombe"                          # sudo-capable human; reached via
 [[ -f /etc/pizza-eagle/bootstrap.env ]] && . /etc/pizza-eagle/bootstrap.env
 
 #### 1. Base packages
-dnf install -y git nodejs jq amazon-cloudwatch-agent || {
-  # AL2023's default node may lag pi's >=22.19 requirement — nodesource fallback.
-  curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -
-  dnf install -y nodejs
-}
+# AL2023's default nodejs is v18 — the bot + pi need >=22, so node comes
+# from nodesource unconditionally (dnf install succeeding with an old
+# version is not a failure — the old || fallback never fired).
+dnf install -y git jq amazon-cloudwatch-agent
+curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -
+dnf install -y nodejs
 
 #### 2. pi (the agent runtime)
 npm install -g @earendil-works/pi-coding-agent
@@ -36,6 +37,11 @@ if [[ ! -d "$PTP_BOT_HOME/.git" ]]; then
   git clone --depth 1 "$PTP_BOT_REPO" "$PTP_BOT_HOME"
   chown -R pizza-eagle:pizza-eagle "$PTP_BOT_HOME"
 fi
+
+#### 4b. Install + build (systemd runs node dist/index.js; the update timer
+#### re-runs these on every nightly pull)
+runuser -u pizza-eagle -- npm ci --omit=dev --prefix "$PTP_BOT_HOME"
+runuser -u pizza-eagle -- npm run build --prefix "$PTP_BOT_HOME"
 
 #### 5. Boot secrets from Secrets Manager (instance role is scoped to these)
 mkdir -p /etc/pizza-eagle
