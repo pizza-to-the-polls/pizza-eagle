@@ -18,11 +18,12 @@ ADMIN_USER="duncombe"                          # sudo-capable human; reached via
 [[ -f /etc/pizza-eagle/bootstrap.env ]] && . /etc/pizza-eagle/bootstrap.env
 
 #### 1. Base packages
-# AL2023's default nodejs is v18 — the bot + pi need >=22, so node comes
-# from nodesource unconditionally (dnf install succeeding with an old
-# version is not a failure — the old || fallback never fired).
+# AL2023's default nodejs is v18 — the bot + pi need >=24 (active LTS,
+# CVE-patched), so node comes from nodesource unconditionally (dnf install
+# succeeding with an old version is not a failure — the old || fallback
+# never fired).
 dnf install -y git jq amazon-cloudwatch-agent
-curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -
+curl -fsSL https://rpm.nodesource.com/setup_24.x | bash -
 dnf install -y nodejs
 
 #### 2. pi (the agent runtime)
