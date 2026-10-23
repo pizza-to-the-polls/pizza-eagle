@@ -1,6 +1,7 @@
-# pizza-eagle — pizza-eagle
+# pizza-eagle — Pizza Eagle 🦅
 
-**Status: scaffolded (2026-10-19) — compiles, not yet deployed.**
+**Status: IN PRODUCTION (deployed 2026-10-23) — stack `pizza-eagle`,
+bot live via Socket Mode, Retool tunnel on `bastion.polls.pizza`.**
 
 Slack front-end around a **pi agent session** for Pizza to the Polls ops
 investigations. `@Pizza Eagle why does upload 13280 have no report?` →
@@ -19,14 +20,21 @@ src/slack.ts         ack/async helpers, chunked posting
 src/store.ts         thread_ts → session/workdir map (state/threads.json)
 src/config.ts        env parsing
 agent/AGENTS.md      operator context (copied into each case workdir)
-systemd/             pizza-eagle.service + nightly update timer + failure notifier
-scripts/bootstrap.sh cloud-init user-data (idempotent, EIP+DNS self-registration)
+skills/               pi skills (ga: GA4 recipes; rides the repo to the bot user)
+systemd/              pizza-eagle.service + update/backup/prune timers + failure notifier
+scripts/bootstrap.sh cloud-init user-data (idempotent; EIP+DNS self-registration)
+scripts/render-template.sh  splices bootstrap.sh into the CFN template's UserData
 scripts/ga.mjs       zero-dep GA4 query helper (readonly SA; report/realtime/accounts)
-scripts/gh-token.mjs GitHub App installation-token minter (pizza-eagle-agent; PEM from Secrets Manager; P4)
+scripts/gh-token.mjs GitHub App installation-token minter (pizza-eagle-agent; PEM from Secrets Manager)
+scripts/publish-hotnready.sh  one-shot publisher to the hotnready Pages sandbox
+scripts/pizza-psql   human DB console (SSM tunnel + Secrets Manager; no secrets in history)
+scripts/notify-failure.sh     unit failures → Slack channel (webhook or bot token)
+cloudwatch/           cwagent config (bot.log → /pizza-eagle/bot)
+iam/                  pizza-eagle-ops policy — canonical definition (mirrored by BotRole)
 manifest.json         Slack app manifest (name, bot user, scopes, Socket Mode)
-cloudformation/      pizza-eagle.yaml — the ops-box stack
-tests/               unit tests (node:test, zero new deps)
-.github/workflows/    test.yml (every push/PR) + deploy.yml (template/bootstrap changes)
+cloudformation/       pizza-eagle.yaml — the ops-box stack
+tests/                unit tests (node:test, zero new deps)
+.github/workflows/    test.yml (every push/PR; required check) + deploy.yml
 ```
 
 ## Tests
@@ -46,11 +54,13 @@ PRs can't merge red.
 ## How a mention flows
 
 ```
-@Pizza Eagle <question>
-  → allowlist check (channels, users)
+@pizza_eagle <question>
+  → (access is OPEN: any user, any channel the bot is in)
+  → fetch the WHOLE THREAD (needs channels:history) → thread-context.md
   → post "🔎 Investigating…" to thread          (instant ack)
   → queue job → pi --print --session-id <thread-session> "<question>"
-      cwd = state/work/<thread>/   (AGENTS.md operator context + case-history.md)
+      cwd = state/work/<thread>/   (AGENTS.md + case-history.md + thread-context.md)
+      requester id rides in the case file — write-powers gated to vetted members
   → findings chunked into the thread; status edited to ✅/❌
   → thread map persisted (follow-ups resume the same pi session)
 ```
@@ -145,7 +155,7 @@ aws cloudformation deploy --stack-name pizza-eagle \
   --template-file build/pizza-eagle.rendered.yaml \
   --capabilities CAPABILITY_NAMED_IAM \
   --parameter-overrides VpcId=vpc-… SubnetId=subnet-… \
-    BotSecretArn=arn:… BackupBucketName=…
+    BotSecretArn=arn:… RdsSecurityGroupId=sg-… BackupBucketName=pizza-eagle-backups
 ```
 
 CI (`.github/workflows/deploy.yml`, OIDC — no AWS keys in GitHub) renders and
@@ -160,7 +170,7 @@ review.
 
 ```
 # ~/.ssh/config — once (instance id from the console)
-Host pizza-eagle
+Host ptp-ops
   HostName i-0…            # instance id (SSM target, not DNS)
   User duncombe
   IdentityFile ~/.ssh/id_ed25519
@@ -169,10 +179,13 @@ Host pizza-eagle
 
   (needs `brew install --cask session-manager-plugin` locally)
 
-- Port-forward to Aurora:
-  `aws ssm start-session --targets "Key=tag:Name,Values=pizza-eagle" \
-    --document-name AWS-StartPortForwardingSessionToRemoteSocket \
-    --parameters host=pizzabase.cluster-c0xyw6eawjva.us-west-2.rds.amazonaws.com,portNumber=5432`
+- Database console: `~/bin/pizza-psql` (or `scripts/pizza-psql`) — SSM
+  ssh -L tunnel on a dynamic local port, credential fetched from Secrets
+  Manager with YOUR identity, passed via `PGPASSWORD`. Never in history.
+  `-d pizzabasestage` for stage; `-r ptp_ro` for read-only.
+
+  ⚠ Reinstalling the Slack app resets its channel memberships — re-`/invite`
+  it anywhere it lived.
 
 Box updates are pull-based: nightly `pizza-eagle-update.timer` runs
 `git pull --ff-only && npm ci && npm run build && systemctl restart pizza-eagle`;
@@ -237,17 +250,14 @@ including Slack messages: delete after one year):
 - Never post raw contact info or raw bucket paths to Slack — conventions
   live in `agent/AGENTS.md`.
 
-## Remaining before first deploy (console-side — Matt)
+## Operations status
 
-- [ ] Secrets under prefix `ptp/prod/pizza-eagle/`: `env` (bot tokens, model
-      key, alert webhook), `ga-readonly` (GA service-account JSON),
-      `retool-ssh-key`, `admin-ssh-key`; P4 adds `gh-pr-token`
-- [ ] `GA_PROPERTY_ID` (GA Admin → Property settings) — or enable the
-      Analytics Admin API in GCP project 115859449668 for self-discovery
-- [ ] Deploy params: `VpcId`, `SubnetId`, `BotSecretArn`, `BackupBucketName`
-- [ ] IAM: `pizza-eagle-github-deploy` OIDC role for Actions (repo
-      pizza-to-the-polls/pizza-eagle, ref main)
-- [ ] P4 (when ready): fine-grained PAT + branch protection on `main` of
-      polls.pizza + pizzabase (branch protection is load-bearing)
-- [ ] Skills sync for the `pizza-eagle` user (`~/.pi/agent/skills`)
-- [ ] Post-P3: `pg_default_acl` fix (new tables invisible to `retool` role)
+Deployed 2026-10-23. Secrets live under `ptp/prod/pizza-eagle/*` (env,
+pi-config, gh-app-key, ga-readonly, bugsnag-token, retool-ssh-key,
+admin-ssh-key). Day-to-day tasks are in the Pizza to the Polls Todoist
+project (🤖Pi label); the design history and roadmap live in
+`SLACK_BOT_PLAN.md` (§10, P0–P5).
+
+Known follow-ups: CW log shipping (stream never materializes — todo),
+Nina/Lee Slack member IDs for the write-gate, prod channel pick,
+old-bastion decommission after soak, OIDC deploy role for CI.
