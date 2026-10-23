@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# pizza-psql — human console access to the pizzabase cluster.
+#
+# Retires the old-bastion pattern of a psql connection string living in
+# bash history: the credential is fetched from Secrets Manager with YOUR
+# identity (never the bot's instance role — the box deliberately has no
+# grant on this secret) and passed via PGPASSWORD, so it never appears in
+# argv, shell history, or any file on any server.
+#
+# Prereqs: aws CLI (your identity), jq, psql (brew install libpq).
+# Secret:  pizzabase/admin = {"user": "...", "password": "...", "dbname": "pizzabase"}
+# Create it once (never paste the password into chat):
+#   aws secretsmanager create-secret --name pizzabase/admin \
+#     --secret-string '{"user":"pizzabase","password":"<NEW ROTATED PASSWORD>","dbname":"pizzabase"}'
+#
+# Usage: pizza-psql [-r ROLE] [psql args...]
+#   pizza-psql                     # admin console via SSM port-forward
+#   pizza-psql -r ptp_ro           # read-only role instead
+set -euo pipefail
+
+SECRET="pizzabase/admin"
+ROLE=""
+args=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -r|--role) ROLE="$2"; shift 2 ;;
+    -s|--secret) SECRET="$2"; shift 2 ;;
+    *) args+=("$1"); shift ;;
+  esac
+done
+
+HOST="pizzabase.cluster-c0xyw6eawjva.us-west-2.rds.amazonaws.com"
+PORT=5432
+
+CREDS=$(AWS_REGION=us-west-2 aws secretsmanager get-secret-value \
+  --secret-id "$SECRET" --query SecretString --output text)
+if [ -n "$ROLE" ]; then
+  USER="$ROLE"
+  DB=$(jq -r '.dbname' <<<"$CREDS")
+  PASS=$(jq -r '.password' <<<"$CREDS")
+  echo "note: role override ($USER) — password from $SECRET must match that role" >&2
+else
+  USER=$(jq -r '.user' <<<"$CREDS")
+  DB=$(jq -r '.dbname' <<<"$CREDS")
+  PASS=$(jq -r '.password' <<<"$CREDS")
+fi
+unset CREDS
+
+# SSM port-forward through the pizza-eagle box (no inbound on the box,
+# no secrets on it — the tunnel egresses from your laptop via 443).
+AWS_REGION=us-west-2 aws ssm start-session \
+  --targets "Key=tag:Name,Values=pizza-eagle" \
+  --document-name AWS-StartPortForwardingSessionToRemoteSocket \
+  --parameters "host=${HOST},portNumber=${PORT}" &
+TUNNEL=$!
+trap 'kill $TUNNEL 2>/dev/null' EXIT
+echo "tunnel up (pid $TUNNEL); waiting for the local port…" >&2
+
+for i in $(seq 1 15); do
+  nc -z localhost 5432 2>/dev/null && break
+  sleep 1
+done
+
+PGPASSWORD="$PASS" exec psql -h localhost -p 5432 -U "$USER" -d "$DB" "${args[@]}"
