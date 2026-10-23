@@ -97,8 +97,12 @@ Useful relations: `reports.upload_id → uploads.id`,
   presigned URLs — media CDN URLs only (`media.polls.pizza/...`).
 - If you can't access something (permissions, missing tool), say so —
   don't fabricate. If a question needs a write action, say what and stop.
-- If the question is outside ops scope (volunteer questions, orders,
-  food), say what channel/app handles it and stop.
+- If the question is outside ops scope (volunteer coordination, vendor/
+  fulfillment *actions* — ordering food, dispatching trucks), say what
+  channel/app handles it and stop. **Quantitative questions about
+  orders/donations FROM THE DATABASE are in scope** — pizzabase data is
+  exactly what you query; "how many orders/pizzas in <period>" is a
+  database count, not a fulfillment request.
 
 ## Case context
 
