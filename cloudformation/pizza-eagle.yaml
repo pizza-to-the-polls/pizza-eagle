@@ -180,7 +180,7 @@ Resources:
         - IpProtocol: tcp
           FromPort: 5432
           ToPort: 5432
-          SourceSecurityGroupId: !Ref RdsSecurityGroupId # bastion duty: Retool tunnel + human psql
+          DestinationSecurityGroupId: !Ref RdsSecurityGroupId # bastion duty (EGRESS uses Destination*, not Source*)
       SecurityGroupIngress:
         # Retool tunnel (port 22). CIDRs from
         # docs.retool.com/data-sources/reference/ip-allowlist-cloud-orgs
