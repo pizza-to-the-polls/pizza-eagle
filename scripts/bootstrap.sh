@@ -86,7 +86,9 @@ if aws secretsmanager get-secret-value --secret-id "${SECRETS_PREFIX}/pi-config"
      --query SecretString --output text > /tmp/pi-config.json 2>/dev/null; then
   install -d -o pizza-eagle -g pizza-eagle -m 700 /home/pizza-eagle/.pi /home/pizza-eagle/.pi/agent
   jq -r 'to_entries[] | .key' /tmp/pi-config.json | while read -r f; do
-    jq --arg f "$f" '.[$f]' /tmp/pi-config.json > "/home/pizza-eagle/.pi/agent/$f"
+    # -r is load-bearing: without it jq writes the JSON-string form
+    # (double-encoded) and pi can't parse the file
+    jq -r --arg f "$f" '.[$f]' /tmp/pi-config.json > "/home/pizza-eagle/.pi/agent/$f"
     chown pizza-eagle:pizza-eagle "/home/pizza-eagle/.pi/agent/$f"
     chmod 600 "/home/pizza-eagle/.pi/agent/$f"
   done
