@@ -39,9 +39,11 @@ if [[ ! -d "$PTP_BOT_HOME/.git" ]]; then
 fi
 
 #### 4b. Install + build (systemd runs node dist/index.js; the update timer
-#### re-runs these on every nightly pull)
-runuser -u pizza-eagle -- npm ci --omit=dev --prefix "$PTP_BOT_HOME"
-runuser -u pizza-eagle -- npm run build --prefix "$PTP_BOT_HOME"
+#### re-runs these on every nightly pull). npm needs cwd at the project root
+#### (npm run --prefix does not resolve node_modules/.bin) and a writable HOME.
+cd "$PTP_BOT_HOME"
+runuser -u pizza-eagle -- env HOME=/home/pizza-eagle npm ci --omit=dev
+runuser -u pizza-eagle -- env HOME=/home/pizza-eagle npm run build
 
 #### 5. Boot secrets from Secrets Manager (instance role is scoped to these)
 mkdir -p /etc/pizza-eagle

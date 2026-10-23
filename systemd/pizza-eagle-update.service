@@ -3,6 +3,8 @@ Description=pizza-eagle update (pull latest agent + listener, rebuild, restart)
 
 [Service]
 Type=oneshot
+# npm resolves node_modules/.bin from cwd — must run at the project root
+WorkingDirectory=/opt/pizza-eagle
 # --ff-only: never auto-merge; a diverged repo means the update fails loudly
 # (OnFailure below posts to Slack) and a human looks at it.
 ExecStart=/usr/bin/git -C /opt/pizza-eagle pull --ff-only
