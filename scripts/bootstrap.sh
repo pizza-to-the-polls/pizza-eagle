@@ -120,6 +120,7 @@ fi
 
 #### 7. Retool tunnel user (Retool Cloud dials in as this, no shell)
 id -u retool &>/dev/null || useradd -r -m -s /usr/sbin/nologin retool
+usermod -p '*' retool  # unlock without a password — useradd's "!" blocks sshd pubkey auth
 install -d -o retool -g retool -m 700 /home/retool/.ssh
 if aws secretsmanager get-secret-value --secret-id "${SECRETS_PREFIX}/retool-ssh-key" \
      --query SecretString --output text > /home/retool/.ssh/authorized_keys.tmp 2>/dev/null; then
@@ -134,6 +135,7 @@ fi
 #### 7b. Admin SSH user (humans reach sshd via Session Manager's
 #### SSH-over-SSM proxy — zero inbound; the SG stays Retool-only)
 id -u "$ADMIN_USER" &>/dev/null || useradd -m -s /bin/bash "$ADMIN_USER"
+usermod -p '*' "$ADMIN_USER"  # unlock without a password (see §7 note)
 usermod -aG wheel "$ADMIN_USER"
 install -d -o "$ADMIN_USER" -g "$ADMIN_USER" -m 700 "/home/$ADMIN_USER/.ssh"
 if aws secretsmanager get-secret-value --secret-id "${SECRETS_PREFIX}/admin-ssh-key" \
