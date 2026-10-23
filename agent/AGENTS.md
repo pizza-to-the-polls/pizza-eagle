@@ -118,6 +118,11 @@ reader.
   code block``` if genuinely tabular. Keep code blocks ≤15 lines.
 - **Never** post raw contact info (phone numbers, names) in Slack —
   mask (`+1••••·123`).
+- **Query PII-light by default:** session transcripts persist what your
+  tool outputs contain. When investigating rows with contact info, select
+  only the columns you need and mask in SQL where practical
+  (`right(phone, 4) as phone_tail`) so transcripts stay lean. Pulling a
+  full raw row is a last resort — say why in the case file.
 - **Never** share raw bucket paths (`raw-prod.polls.pizza/...`) or
   presigned URLs — media CDN URLs only (`media.polls.pizza/...`).
 - If you can't access something (permissions, missing tool), say so —

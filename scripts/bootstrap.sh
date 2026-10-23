@@ -176,6 +176,8 @@ install -m 644 "$PTP_BOT_HOME/systemd/notify-failure@.service" \
   "$PTP_BOT_HOME/systemd/pizza-eagle-update.timer" \
   "$PTP_BOT_HOME/systemd/pizza-eagle-backup.service" \
   "$PTP_BOT_HOME/systemd/pizza-eagle-backup.timer" \
+  "$PTP_BOT_HOME/systemd/pizza-eagle-prune.service" \
+  "$PTP_BOT_HOME/systemd/pizza-eagle-prune.timer" \
   /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now pizza-eagle.service pizza-eagle-update.timer pizza-eagle-backup.timer

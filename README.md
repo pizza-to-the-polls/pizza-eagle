@@ -194,6 +194,26 @@ aws s3 cp "s3://pizza-eagle-backups/$latest" - | tar xzf - -C /opt/pizza-eagle/s
 sudo systemctl start pizza-eagle
 ```
 
+## Record retention (PTP policy compliance)
+
+State backups and live state contain 1-year-class records under the PTP
+Document Retention & Destruction Policy (rule c — electronic documents,
+including Slack messages: delete after one year):
+
+- **S3 backups** (`pizza-eagle-backups`): lifecycle expires objects at
+  **180 days** — stricter than the policy requires, and noncurrent
+  versions at 30 days, so deletions actually complete.
+- **Live state** (`state/sessions`, `state/work` incl. verbatim Slack
+  thread context): `pizza-eagle-prune.timer` deletes anything older than
+  **365 days**, weekly.
+- **Legal hold** (rule d): `sudo systemctl mask pizza-eagle-prune.timer`
+  suspends pruning until the hold lifts; S3 lifecycle must also be
+  suspended from the console during a hold.
+- **Exceptions**: only the PTP President or Audit Committee (policy,
+  Exceptions section).
+- Transcripts are kept PII-light by convention (masked columns in
+  queries — see AGENTS.md).
+
 ## Observability
 
 - **Bugsnag**: listener errors report to the PTP project (`BUGSNAG_KEY`) —

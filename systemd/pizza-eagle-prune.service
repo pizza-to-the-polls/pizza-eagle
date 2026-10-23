@@ -1,0 +1,14 @@
+[Unit]
+Description=pizza-eagle state retention prune (PTP retention policy rule c: 1-year max)
+Documentation=https://github.com/pizza-to-the-polls/pizza-eagle README "Record retention"
+
+[Service]
+Type=oneshot
+User=pizza-eagle
+Group=pizza-eagle
+# PTP Document Retention & Destruction Policy, rule (c): electronic
+# documents including Slack messages are deleted after ONE YEAR. Sessions,
+# case workdirs (incl. thread-context.md with verbatim Slack messages) and
+# transcripts are 1-year-class records.
+# LEGAL HOLD (rule d): systemctl mask pizza-eagle-prune.timer to suspend.
+ExecStart=/bin/bash -c 'find /opt/pizza-eagle/state/work /opt/pizza-eagle/state/sessions -type f -mtime +365 -delete; find /opt/pizza-eagle/state/work /opt/pizza-eagle/state/sessions -type d -empty -delete'

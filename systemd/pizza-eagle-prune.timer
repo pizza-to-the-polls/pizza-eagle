@@ -1,0 +1,9 @@
+[Unit]
+Description=pizza-eagle weekly retention prune
+
+[Timer]
+OnCalendar=weekly
+Persistent=true
+
+[Install]
+WantedBy=timers.target
