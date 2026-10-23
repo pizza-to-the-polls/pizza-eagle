@@ -32,7 +32,10 @@ for (const line of (await import("node:fs")).readFileSync("/opt/pizza-eagle/.env
 
 // 1+2. Slack tokens
 const api = async (method, tok) => {
-  const res = await fetch(`https://slack.com/api/${method}`, { headers: { Authorization: `Bearer ${tok}` } });
+  const res = await fetch(`https://slack.com/api/${method}`, {
+    method: "POST", // apps.connections.open rejects GET with insecure_request
+    headers: { Authorization: `Bearer ${tok}`, "Content-Type": "application/x-www-form-urlencoded" },
+  });
   const j = await res.json();
   if (!j.ok) throw new Error(j.error ?? "slack api not ok");
   return j;
