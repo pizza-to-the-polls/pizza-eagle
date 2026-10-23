@@ -156,7 +156,7 @@ Resources:
   OpsSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: pizza-eagle box — egress only except Retool tunnel
+      GroupDescription: "pizza-eagle box - egress only except Retool tunnel"
       VpcId: !Ref VpcId
       SecurityGroupEgress:
         - IpProtocol: tcp
