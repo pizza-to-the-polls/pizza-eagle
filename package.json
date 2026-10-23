@@ -17,7 +17,7 @@
     "backup": "tar czf - -C \"${BOT_STATE_DIR:-./state}\" . | aws s3 cp - \"s3://${BOT_BACKUP_BUCKET:-pizza-eagle-backups}/state-$(date +%Y%m%d-%H%M).tgz\"",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
-    "test": "node --import tsx --test tests/"
+    "test": "node --import tsx --test tests/*.test.ts"
   },
   "dependencies": {
     "@slack/socket-mode": "^2.0.0",
