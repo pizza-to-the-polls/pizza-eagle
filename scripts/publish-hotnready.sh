@@ -30,7 +30,9 @@ rm -rf "$WORK/hr/$SLUG"
 cp -r "$SRC" "$WORK/hr/$SLUG"
 git -C "$WORK/hr" "${GITID[@]}" add -A
 git -C "$WORK/hr" "${GITID[@]}" commit -q -m "$MSG"
-git -C "$WORK/hr" -c http.extraheader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64)" \
+# tr -d newline is load-bearing: GNU base64 wraps at 76 cols and an embedded
+# newline in the header makes libcurl fail with bad-function-argument
+git -C "$WORK/hr" -c http.extraheader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')" \
   push -q origin HEAD:refs/heads/main
 
 echo "published: https://pizza-to-the-polls.github.io/hotnready/$SLUG/"
