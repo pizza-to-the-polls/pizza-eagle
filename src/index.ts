@@ -8,13 +8,13 @@
 
 import { SocketModeClient } from "@slack/socket-mode";
 import { WebClient } from "@slack/web-api";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { loadConfig } from "./config.js";
 import { ThreadStore, workdirFor, type ThreadRecord } from "./store.js";
 import Bugsnag from "@bugsnag/js";
-import { editStatus, postFindings, postStatus, stripMention } from "./slack.js";
+import { editStatus, fetchThreadContext, postFindings, postStatus, stripMention } from "./slack.js";
 import { InvestigationError, runInvestigation, activeInvestigations } from "./investigate.js";
 
 interface MentionEvent {
@@ -112,6 +112,18 @@ async function main(): Promise<void> {
         lastAnswer: null,
       } as ThreadRecord);
 
+    // Thread review: pull the whole conversation the mention landed in so
+    // the investigation sees prior discussion (needs channels:history on the
+    // app; degrades to empty + warn until that scope is granted).
+    let threadContext = "";
+    if (event.thread_ts) {
+      try {
+        threadContext = await fetchThreadContext(slack, event.channel, event.thread_ts);
+      } catch (e) {
+        console.warn("[pizza-eagle] thread context unavailable:", (e as Error).message);
+      }
+    }
+
     const statusTs = await postStatus(
       slack,
       event.channel,
@@ -122,6 +134,10 @@ async function main(): Promise<void> {
     void queue.run(async () => {
       if (shuttingDown) return;
       try {
+        if (threadContext) {
+          // refresh on every run so follow-ups see the newest replies
+          writeFileSync(join(record.workdir, "thread-context.md"), threadContext + "\n");
+        }
         const { answer } = await runInvestigation(cfg, {
           question,
           sessionId: record.sessionId,

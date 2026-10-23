@@ -27,6 +27,11 @@ export function toSlackMrkdwn(md: string): string {
   return parts
     .map((part, i) => {
       if (i % 2 === 1) return part; // inside fence/inline code — leave alone
+      // Markdown tables render as raw pipes in Slack — fence them instead.
+      part = part.replace(
+        /(?:^|\n)((?:[ \t]*\|[^\n]*\|[ \t]*(?:\n|$))+)/g,
+        (block) => `\n\`\`\`\n${block.trim()}\n\`\`\`\n`,
+      );
       return part
         .replace(/^#{1,6}\s+(.+)$/gm, (_m, t) => `*${String(t).trim()}*`)
         .replace(/\*\*([^*\n]+)\*\*/g, (_m, t) => `*${t}*`)
@@ -34,6 +39,32 @@ export function toSlackMrkdwn(md: string): string {
         .replace(/^\s*[-*]\s+/gm, "• ");
     })
     .join("");
+}
+
+/** Thread review: format Slack replies as a readable transcript. */
+export function formatThreadMessages(
+  messages: Array<{ ts?: string; user?: string; username?: string; text?: string }>,
+): string {
+  return messages
+    .map((m) => {
+      const clock = m.ts ? new Date(Number(m.ts) * 1000).toISOString().slice(11, 19) : "--:--:--";
+      const who = m.username ?? m.user ?? "?";
+      const text = (m.text ?? "").replace(/<@([A-Z0-9]+)>/g, "@$1");
+      return `[${clock}] ${who}: ${text}`;
+    })
+    .join("\n");
+}
+
+/** Fetch the full thread the bot was tagged in (needs channels:history). */
+export async function fetchThreadContext(
+  slack: WebClient,
+  channel: string,
+  threadTs: string,
+): Promise<string> {
+  const res = await slack.conversations.replies({ channel, ts: threadTs, limit: 200 });
+  return formatThreadMessages(
+    (res.messages ?? []) as Array<{ ts?: string; user?: string; username?: string; text?: string }>,
+  );
 }
 
 export function stripMention(text: string): string {

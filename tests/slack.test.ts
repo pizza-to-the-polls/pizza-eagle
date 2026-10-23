@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chunkMarkdown, stripMention, toSlackMrkdwn } from "../src/slack.js";
+import { chunkMarkdown, formatThreadMessages, stripMention, toSlackMrkdwn } from "../src/slack.js";
 
 test("mrkdwn: ATX headers become bold lines", () => {
   assert.equal(toSlackMrkdwn("## Report status\n### Details"), "*Report status*\n*Details*");
@@ -52,4 +52,26 @@ test("chunkMarkdown: long text chunks respect the limit and split on boundaries"
     text.replace(/\s+/g, ""),
     "chunks preserve all content",
   );
+});
+
+test("mrkdwn: markdown tables become code blocks (Slack can't render pipes)", () => {
+  const out = toSlackMrkdwn("Summary:\n| File | Change |\n|---|---|\n| a.ts | red → blue |\nDone");
+  assert.ok(out.includes("```"), "table gets fenced");
+  assert.ok(out.includes("| File | Change |"), "table content preserved");
+  assert.ok(!/\*File\*/.test(out), "table cells not mangled into bold");
+});
+
+test("mrkdwn: tables inside existing code fences stay untouched", () => {
+  const md = "before\n```\n| a | b |\n|---|---|\n```\nafter";
+  const out = toSlackMrkdwn(md);
+  assert.equal(out.match(/```/g)?.length, 2, "no nested fencing");
+});
+
+test("formatThreadMessages: readable transcript with @mentions resolved", () => {
+  const out = formatThreadMessages([
+    { ts: "1792776633.189779", user: "U2ZLJ2KBP", text: "hey <@U0CAH280B6E> what's up with uploads?" },
+    { ts: "1792777000.000001", username: "pizza_eagle", text: "checking…" },
+  ]);
+  assert.ok(out.includes("[17:30:33] U2ZLJ2KBP: hey @U0CAH280B6E what's up"), "user + mention resolved");
+  assert.ok(out.includes("[17:36:40] pizza_eagle: checking"), "bot lines included");
 });

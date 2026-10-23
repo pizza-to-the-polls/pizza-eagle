@@ -1,11 +1,20 @@
 {
   "agent": { "region": "us-west-2", "metrics_collection_interval": 60 },
   "logs": {
-    "log_group_name": "/pizza-eagle/bot",
-    "log_stream_name": "{hostname}",
     "logs_collected": {
       "journald": {
-        "units": ["pizza-eagle.service", "pizza-eagle-backup.service", "amazon-cloudwatch-agent"]
+        "collect_list": [
+          {
+            "event_source": "pizza-eagle.service",
+            "log_group_name": "/pizza-eagle/bot",
+            "log_stream_name": "{hostname}"
+          },
+          {
+            "event_source": "pizza-eagle-backup.service",
+            "log_group_name": "/pizza-eagle/bot",
+            "log_stream_name": "{hostname}-backup"
+          }
+        ]
       }
     }
   }

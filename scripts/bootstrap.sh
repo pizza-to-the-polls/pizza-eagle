@@ -184,6 +184,9 @@ systemctl enable --now pizza-eagle.service pizza-eagle-update.timer pizza-eagle-
 #### searchable in AWS, and the agent can read its own log group)
 install -m 644 "$PTP_BOT_HOME/cloudwatch/agent.json" \
   /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+# enable alone doesn't load the config — fetch-config does (learned live)
+amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 \
+  -c file:/opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json -s
 systemctl enable --now amazon-cloudwatch-agent
 
 echo "pizza-eagle bootstrap complete."

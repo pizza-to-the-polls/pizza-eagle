@@ -1,7 +1,7 @@
 {
   "display_information": {
     "name": "Pizza Eagle",
-    "description": "PTP ops investigator. @mention it with an ops question — it investigates read-only (DB, logs, Bugsnag) and posts findings to the thread.",
+    "description": "PTP ops investigator. @mention it with an ops question \u2014 it investigates read-only (DB, logs, Bugsnag) and posts findings to the thread.",
     "background_color": "#cc5a22"
   },
   "features": {
@@ -20,5 +20,9 @@
   },
   "settings": {
     "socket_mode_enabled": true
-  }
+  },
+  "scopes": [
+    "channels:history",
+    "groups:history"
+  ]
 }
