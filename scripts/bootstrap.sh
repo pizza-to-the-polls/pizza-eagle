@@ -180,4 +180,10 @@ install -m 644 "$PTP_BOT_HOME/systemd/notify-failure@.service" \
 systemctl daemon-reload
 systemctl enable --now pizza-eagle.service pizza-eagle-update.timer pizza-eagle-backup.timer
 
+#### 10. CloudWatch agent — journald → /pizza-eagle/bot (box logs are
+#### searchable in AWS, and the agent can read its own log group)
+install -m 644 "$PTP_BOT_HOME/cloudwatch/agent.json" \
+  /opt/aws/amazon-cloudwatch-agent/etc/amazon-cloudwatch-agent.json
+systemctl enable --now amazon-cloudwatch-agent
+
 echo "pizza-eagle bootstrap complete."

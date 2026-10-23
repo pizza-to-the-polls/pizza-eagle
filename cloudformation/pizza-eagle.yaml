@@ -68,7 +68,15 @@ Resources:
               - Sid: LogsRead
                 Effect: Allow
                 Action: [logs:DescribeLogGroups, logs:DescribeLogStreams, logs:GetLogEvents, logs:FilterLogEvents]
-                Resource: arn:aws:logs:us-west-2:320802729995:log-group:/aws/lambda/pizzabase-*
+                Resource:
+                  - arn:aws:logs:us-west-2:320802729995:log-group:/aws/lambda/pizzabase-*
+                  # the agent can read its OWN logs (observability: "check your errors")
+                  - arn:aws:logs:us-west-2:320802729995:log-group:/pizza-eagle*
+              # CloudWatch agent ships journald → /pizza-eagle/bot
+              - Sid: LogsWriteAgent
+                Effect: Allow
+                Action: [logs:CreateLogGroup, logs:CreateLogStream, logs:PutLogEvents, logs:DescribeLogStreams]
+                Resource: arn:aws:logs:us-west-2:320802729995:log-group:/pizza-eagle*
               - Sid: MediaConvertRead
                 Effect: Allow
                 Action: [mediaconvert:GetJob, mediaconvert:ListJobs, mediaconvert:DescribeEndpoints]
