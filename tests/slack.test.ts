@@ -86,7 +86,7 @@ test("react: add/remove calls, errors swallowed", async () => {
   } as unknown as import("../src/slack.js").WebClient;
   await react(fake, "C1", "123.456", "pizza-eagle-working", true);
   await react(fake, "C1", "123.456", "pizza-eagle-working", false);
-  assert.deepEqual(calls, ["add:eyes:123.456", "remove:eyes"]);
+  assert.deepEqual(calls, ["add:pizza-eagle-working:123.456", "remove:pizza-eagle-working"]);
   // a failing reaction must never throw
   const broken = {
     reactions: {
