@@ -4,3 +4,9 @@ state/
 .env
 *.log
 build/
+*.swp
+*.swo
+*~
+.DS_Store
+.env.*
+!.env.example
