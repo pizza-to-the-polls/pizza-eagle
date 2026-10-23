@@ -14,18 +14,18 @@
     "scopes": {
       "bot": [
         "app_mentions:read",
-        "chat:write"
+        "assistant:write",
+        "canvases:read",
+        "canvases:write",
+        "channels:history",
+        "chat:write",
+        "groups:history",
+        "reactions:read",
+        "reactions:write"
       ]
     }
   },
   "settings": {
     "socket_mode_enabled": true
-  },
-  "scopes": [
-    "channels:history",
-    "groups:history",
-    "reactions:write",
-    "canvases:read",
-    "canvases:write"
-  ]
+  }
 }
