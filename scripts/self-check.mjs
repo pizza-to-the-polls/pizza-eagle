@@ -115,7 +115,11 @@ const lines = results.map(([ok, name, why]) => `${ok} ${name}${why ? ` — \`${w
 const digest = `${icon} *pizza-eagle daily self-check*\n${lines}`;
 console.log(digest);
 
-if (env.SLACK_ALERT_CHANNEL && env.SLACK_BOT_TOKEN) {
+// Ops posture (decided 2026-10-24): silence when green, loud when failing.
+// Green runs log to journald/CW only; any ❌ posts the FULL digest so the
+// failure arrives with its context. (Checker itself dying: OnFailure chain
+// posts the generic unit-failure alert.)
+if (results.some(r => r[0] === "❌") && env.SLACK_ALERT_CHANNEL && env.SLACK_BOT_TOKEN) {
   const res = await fetch("https://slack.com/api/chat.postMessage", {
     method: "POST",
     headers: { Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`, "Content-Type": "application/json" },
@@ -123,5 +127,7 @@ if (env.SLACK_ALERT_CHANNEL && env.SLACK_BOT_TOKEN) {
   });
   const j = await res.json();
   if (!j.ok) console.error("digest post failed:", j.error);
+} else if (!results.some(r => r[0] === "❌")) {
+  console.log("all green — staying silent in Slack");
 }
 process.exit(results.some(r => r[0] === "❌") ? 1 : 0);
