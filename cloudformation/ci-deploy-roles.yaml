@@ -1,0 +1,185 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  CI deploy roles for GitHub Actions (OIDC). One role per repo, scoped to
+  what each deploy actually needs. No static AWS keys anywhere.
+
+Parameters:
+  GitHubOidcProviderArn:
+    Type: String
+    Default: arn:aws:iam::320802729995:oidc-provider/token.actions.githubusercontent.com
+
+Resources:
+  # ── polls.pizza deploy role ─────────────────────────────────────────
+  # Static site: S3 sync to the prod bucket + CloudFront invalidation.
+  # Deliberately tiny.
+  PollsPizzaDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: polls-pizza-deploy
+      Description: GitHub Actions deploy for pizza-to-the-polls/polls.pizza (S3 sync + CloudFront)
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Federated: !Ref GitHubOidcProviderArn }
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: [sts.amazonaws.com]
+              StringLike:
+                token.actions.githubusercontent.com:sub: repo:pizza-to-the-polls/polls.pizza:*
+      Policies:
+        - PolicyName: polls-pizza-deploy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: SiteBucketSync
+                Effect: Allow
+                Action: [s3:PutObject, s3:DeleteObject, s3:ListBucket, s3:GetObject]
+                Resource:
+                  - arn:aws:s3:::polls.pizza
+                  - arn:aws:s3:::polls.pizza/*
+              - Sid: CloudFrontInvalidation
+                Effect: Allow
+                Action: [cloudfront:CreateInvalidation, cloudfront:GetDistribution, cloudfront:GetInvalidation]
+                Resource: "*"
+                # CloudFront is a global service (us-east-1) — Resource: "*" is
+                # the only option; the action set is the actual boundary.
+
+  # ── pizzabase deploy role ───────────────────────────────────────────
+  # Serverless Framework deploy: CFN + Lambda + IAM + API GW + CloudFront
+  # + S3 artifacts + CW Logs + Events + Secrets + VPC discovery.
+  # Deliberately broad (serverless creates everything) but still a huge
+  # improvement over AdministratorAccess static keys.
+  PizzabaseDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: pizzabase-deploy
+      Description: GitHub Actions serverless deploy for pizza-to-the-polls/pizzabase
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Federated: !Ref GitHubOidcProviderArn }
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: [sts.amazonaws.com]
+              StringLike:
+                token.actions.githubusercontent.com:sub: repo:pizza-to-the-polls/pizzabase:*
+      Policies:
+        - PolicyName: pizzabase-deploy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # CloudFormation: the deploy mechanism (serverless wraps CFN)
+              - Sid: CloudFormationPizzaBase
+                Effect: Allow
+                Action:
+                  [cloudformation:Create*, cloudformation:Delete*, cloudformation:Describe*,
+                   cloudformation:Execute*, cloudformation:List*, cloudformation:Update*,
+                   cloudformation:Validate*, cloudformation:Get*]
+                Resource: [!Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/pizzabase-*/*"]
+              - Sid: CloudFormationGlobal
+                Effect: Allow
+                Action: [cloudformation:ValidateTemplate, cloudformation:ListStacks]
+                Resource: "*"
+              # Lambda functions + layers
+              - Sid: LambdaPizzaBase
+                Effect: Allow
+                Action: [lambda:*]
+                Resource: [!Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:pizzabase-*",
+                           !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:layer:*"]
+              - Sid: LambdaList
+                Effect: Allow
+                Action: [lambda:ListFunctions, lambda:ListLayers, lambda:GetAccountSettings]
+                Resource: "*"
+              # IAM: serverless creates Lambda execution roles
+              - Sid: IamForServerless
+                Effect: Allow
+                Action:
+                  [iam:CreateRole, iam:DeleteRole, iam:GetRole, iam:PassRole,
+                   iam:UpdateRole, iam:PutRolePolicy, iam:DeleteRolePolicy,
+                   iam:GetRolePolicy, iam:ListRolePolicies, iam:ListAttachedRolePolicies,
+                   iam:AttachRolePolicy, iam:DetachRolePolicy,
+                   iam:CreateInstanceProfile, iam:DeleteInstanceProfile,
+                   iam:GetInstanceProfile, iam:AddRoleToInstanceProfile,
+                   iam:RemoveRoleFromInstanceProfile, iam:TagRole, iam:UntagRole]
+                Resource: [!Sub "arn:aws:iam::${AWS::AccountId}:role/pizzabase-*"]
+              # API Gateway
+              - Sid: ApiGateway
+                Effect: Allow
+                Action: [apigateway:*]
+                Resource: [!Sub "arn:aws:apigateway:${AWS::Region}::/*"]
+              # S3: serverless deployment artifacts
+              - Sid: S3ServerlessArtifacts
+                Effect: Allow
+                Action: [s3:CreateBucket, s3:DeleteBucket, s3:ListBucket,
+                         s3:PutObject, s3:GetObject, s3:DeleteObject,
+                         s3:PutBucketPolicy, s3:GetBucketPolicy, s3:DeleteBucketPolicy,
+                         s3:PutBucketTagging, s3:GetBucketLocation]
+                Resource:
+                  - !Sub "arn:aws:s3:::pizzabase-*"
+                  - !Sub "arn:aws:s3:::pizzabase-*/*"
+              # CloudWatch Logs
+              - Sid: LogsForPizzaBase
+                Effect: Allow
+                Action: [logs:CreateLogGroup, logs:DeleteLogGroup, logs:PutRetentionPolicy,
+                         logs:DescribeLogGroups, logs:DescribeLogStreams, logs:TagResource,
+                         logs:TagLogGroup]
+                Resource: [!Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/lambda/pizzabase-*"]
+              - Sid: LogsListAll
+                Effect: Allow
+                Action: [logs:DescribeLogGroups, logs:DescribeLogStreams]
+                Resource: "*"
+              # EventBridge
+              - Sid: EventBridgePizzaBase
+                Effect: Allow
+                Action: [events:PutRule, events:DeleteRule, events:DescribeRule,
+                         events:PutTargets, events:RemoveTargets, events:ListTargetsByRule,
+                         events:EnableRule, events:DisableRule, events:TagResource]
+                Resource: [!Sub "arn:aws:events:${AWS::Region}:${AWS::AccountId}:rule/pizzabase-*"]
+              - Sid: EventBridgeList
+                Effect: Allow
+                Action: [events:ListRules, events:DescribeEventBus]
+                Resource: "*"
+              # Secrets Manager: Lambda env vars reference secrets
+              - Sid: SecretsForEnvVars
+                Effect: Allow
+                Action: [secretsmanager:GetSecretValue, secretsmanager:DescribeSecret]
+                Resource: "*"
+              # EC2 discovery for Lambda VPC config
+              - Sid: Ec2DiscoveryForLambda
+                Effect: Allow
+                Action: [ec2:DescribeVpcs, ec2:DescribeSubnets, ec2:DescribeSecurityGroups]
+                Resource: "*"
+              # CloudFront (for API Gateway distributions)
+              - Sid: CloudFrontForApi
+                Effect: Allow
+                Action: [cloudfront:CreateDistribution, cloudfront:UpdateDistribution,
+                         cloudfront:DeleteDistribution, cloudfront:GetDistribution,
+                         cloudfront:GetDistributionConfig, cloudfront:ListDistributions,
+                         cloudfront:CreateInvalidation, cloudfront:TagResource,
+                         cloudfront:ListOriginAccessControls, cloudfront:CreateOriginAccessControl,
+                         cloudfront:UpdateOriginAccessControl, cloudfront:GetOriginAccessControl]
+                Resource: "*"
+              # KMS (for encrypted env vars)
+              - Sid: KmsForLambda
+                Effect: Allow
+                Action: [kms:DescribeKey, kms:ListKeys, kms:ListAliases, kms:CreateAlias,
+                         kms:UpdateAlias, kms:DeleteAlias, kms:TagResource]
+                Resource: "*"
+              # SQS (if the app uses queues)
+              - Sid: SqsForApp
+                Effect: Allow
+                Action: [sqs:CreateQueue, sqs:DeleteQueue, sqs:GetQueueAttributes,
+                         sqs:SetQueueAttributes, sqs:TagQueue, sqs:ListQueues]
+                Resource: [!Sub "arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:pizzabase-*"]
+              # CloudWatch alarms
+              - Sid: CloudWatchAlarms
+                Effect: Allow
+                Action: [cloudwatch:PutMetricAlarm, cloudwatch:DescribeAlarms,
+                         cloudwatch:DeleteAlarms, cloudwatch:TagResource]
+                Resource: "*"
