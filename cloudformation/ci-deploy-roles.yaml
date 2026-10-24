@@ -36,7 +36,7 @@ Resources:
             Statement:
               - Sid: SiteBucketSync
                 Effect: Allow
-                Action: [s3:PutObject, s3:DeleteObject, s3:ListBucket, s3:GetObject]
+                Action: [s3:PutObject, s3:PutObjectAcl, s3:DeleteObject, s3:ListBucket, s3:GetObject]
                 Resource:
                   - arn:aws:s3:::polls.pizza
                   - arn:aws:s3:::polls.pizza/*
