@@ -182,7 +182,7 @@ install -m 644 "$PTP_BOT_HOME/systemd/notify-failure@.service" \
   "$PTP_BOT_HOME/systemd/pizza-eagle-selfcheck.timer" \
   /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable --now pizza-eagle.service pizza-eagle-update.timer pizza-eagle-backup.timer
+systemctl enable --now pizza-eagle.service pizza-eagle-update.timer pizza-eagle-backup.timer pizza-eagle-prune.timer pizza-eagle-selfcheck.timer
 
 #### 10. CloudWatch agent — bot.log → /pizza-eagle/bot (box logs are
 #### searchable in AWS, and the agent can read its own log group)
