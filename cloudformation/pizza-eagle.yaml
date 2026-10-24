@@ -277,13 +277,17 @@ Resources:
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
+              - Sid: CloudFormationValidateTemplate
+                Effect: Allow
+                Action: [cloudformation:ValidateTemplate]
+                Resource: "*" # global-scope action: validates a body, not a stack
               - Sid: CloudFormationPizzaEagleStack
                 Effect: Allow
                 Action:
-                  [cloudformation:ValidateTemplate, cloudformation:CreateChangeSet,
-                   cloudformation:DescribeChangeSet, cloudformation:DeleteChangeSet,
-                   cloudformation:DescribeStacks, cloudformation:DescribeStackEvents,
-                   cloudformation:ExecuteChangeSet, cloudformation:ListChangeSets]
+                  [cloudformation:CreateChangeSet, cloudformation:DescribeChangeSet,
+                   cloudformation:DeleteChangeSet, cloudformation:DescribeStacks,
+                   cloudformation:DescribeStackEvents, cloudformation:ExecuteChangeSet,
+                   cloudformation:ListChangeSets]
                 Resource: [!Sub arn:aws:cloudformation:us-west-2:320802729995:stack/pizza-eagle/*]
               - Sid: SsmUpdateAgent
                 Effect: Allow
