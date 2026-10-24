@@ -268,9 +268,10 @@ Resources:
               StringEquals:
                 token.actions.githubusercontent.com:aud: [sts.amazonaws.com]
               StringLike:
-                # any workflow in the repo may assume; the repo's own branch
-                # protection (required test check) gates what reaches main
-                token.actions.githubusercontent.com:sub: repo:pizza-to-the-polls/pizza-eagle:*
+                # GitHub sub carries org/repo numeric IDs + the environment
+                # claim for environment-scoped jobs: repo:org@id/repo@id:environment:production
+                # (proven live 2026-10-24 — only production-environment deploys may assume)
+                token.actions.githubusercontent.com:sub: repo:pizza-to-the-polls@*/pizza-eagle@*:environment:production
       Policies:
         - PolicyName: deploy
           PolicyDocument:
