@@ -243,6 +243,50 @@ Resources:
             echo '@@BOOTSTRAP_B64@@' | base64 -d > /root/bootstrap.sh
             bash /root/bootstrap.sh
 
+  # GitHub OIDC: lets Actions deploy with short-lived tokens instead of
+  # static AWS keys (the pizza-eagle-github-deploy role deploy.yml assumes).
+  GitHubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList: [sts.amazonaws.com]
+      ThumbprintList: [6938fd4d98bab03faadb97b34396831e3780aea1] # GitHub root CA (AWS validates known providers server-side)
+  DeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: pizza-eagle-github-deploy
+      Description: GitHub Actions deploy role (repo pizza-to-the-polls/pizza-eagle) - changeset-first, scoped
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Federated: !Ref GitHubOidcProvider }
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: [sts.amazonaws.com]
+              StringLike:
+                # any workflow in the repo may assume; the repo's own branch
+                # protection (required test check) gates what reaches main
+                token.actions.githubusercontent.com:sub: repo:pizza-to-the-polls/pizza-eagle:*
+      Policies:
+        - PolicyName: deploy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: CloudFormationPizzaEagleStack
+                Effect: Allow
+                Action:
+                  [cloudformation:ValidateTemplate, cloudformation:CreateChangeSet,
+                   cloudformation:DescribeChangeSet, cloudformation:DeleteChangeSet,
+                   cloudformation:DescribeStacks, cloudformation:DescribeStackEvents,
+                   cloudformation:ExecuteChangeSet, cloudformation:ListChangeSets]
+                Resource: [!Sub arn:aws:cloudformation:us-west-2:320802729995:stack/pizza-eagle/*]
+              - Sid: SsmUpdateAgent
+                Effect: Allow
+                Action: [ssm:SendCommand, ssm:DescribeCommand, ssm:ListCommands, ssm:CancelCommand]
+                Resource: "*"
+
   # Liveness: the bot emits a pizza-eagle/Heartbeat metric every 5 min
   # (src/index.ts); this alarm fires when it goes silent — "systemd active"
   # alone can't see a hung socket.
