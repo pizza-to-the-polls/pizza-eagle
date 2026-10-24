@@ -1,0 +1,25 @@
+name: health
+
+on:
+  schedule:
+    - cron: "0 16 * * *" # 09:00 America/Los_Angeles daily
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    # environment-scoped so the OIDC sub matches the deploy role's trust
+    # (repo:org@id/repo@id:environment:production — proven live)
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::320802729995:role/pizza-eagle-github-deploy
+          aws-region: us-west-2
+      - name: Off-box probes (silent when green)
+        run: node scripts/health-check.mjs

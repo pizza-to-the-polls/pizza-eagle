@@ -289,6 +289,14 @@ Resources:
                 Effect: Allow
                 Action: [ssm:SendCommand, ssm:DescribeCommand, ssm:ListCommands, ssm:CancelCommand]
                 Resource: "*"
+              # Off-box health check (GitHub Actions, scripts/health-check.mjs):
+              # proves the agent is alive + backups flowing from OUTSIDE the box.
+              - Sid: HealthProbeReads
+                Effect: Allow
+                Action: [cloudwatch:GetMetricStatistics, s3:ListBucket, secretsmanager:GetSecretValue]
+                Resource:
+                  - !Ref BotSecretArn
+                  - !Sub arn:aws:s3:::${BackupBucketName}
 
   # Liveness: the bot emits a pizza-eagle/Heartbeat metric every 5 min
   # (src/index.ts); this alarm fires when it goes silent — "systemd active"
