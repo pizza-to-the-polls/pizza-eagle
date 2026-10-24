@@ -301,12 +301,20 @@ Resources:
                 Resource: arn:aws:ssm:us-west-2::parameter/aws/service/ami-amazon-linux-latest/*
               # Off-box health check (GitHub Actions, scripts/health-check.mjs):
               # proves the agent is alive + backups flowing from OUTSIDE the box.
-              - Sid: HealthProbeReads
+              # Actions and resources must line up per-service (CW metrics are
+              # global-scope; the earlier one-lump grant denied GetMetricStatistics).
+              - Sid: HealthProbeSecret
                 Effect: Allow
-                Action: [cloudwatch:GetMetricStatistics, s3:ListBucket, secretsmanager:GetSecretValue]
-                Resource:
-                  - !Ref BotSecretArn
-                  - !Sub arn:aws:s3:::${BackupBucketName}
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref BotSecretArn
+              - Sid: HealthProbeBackup
+                Effect: Allow
+                Action: s3:ListBucket
+                Resource: !Sub arn:aws:s3:::${BackupBucketName}
+              - Sid: HealthProbeHeartbeat
+                Effect: Allow
+                Action: cloudwatch:GetMetricStatistics
+                Resource: "*"
 
   # Liveness: the bot emits a pizza-eagle/Heartbeat metric every 5 min
   # (src/index.ts); this alarm fires when it goes silent — "systemd active"
