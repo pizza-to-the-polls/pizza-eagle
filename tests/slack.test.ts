@@ -103,3 +103,20 @@ test("react: add/remove calls, errors swallowed", async () => {
   } as unknown as import("../src/slack.js").WebClient;
   await react(broken, "C1", "1", "pizza-eagle-working", true); // no throw = pass
 });
+
+test("mrkdwn: ISO timestamps become Slack date formatting (reader's native tz)", () => {
+  const out = toSlackMrkdwn("Upload 13297 failed at 2026-10-22T17:23:00Z on the media pipeline");
+  assert.ok(out.includes("<!date^"), "date token present");
+  assert.ok(out.includes("{date_short_pretty} at {time}"), "pattern present");
+  assert.ok(out.includes("2026-10-22 17:23 UTC"), "fallback present");
+  assert.ok(!out.includes("2026-10-22T17:23:00Z"), "raw ISO consumed");
+});
+
+test("mrkdwn: date-only stays as-is (no tz assumption without a time)", () => {
+  assert.ok(!toSlackMrkdwn("on 2026-10-22 we saw a spike").includes("<!date^"));
+});
+
+test("mrkdwn: timestamps inside code blocks are not converted", () => {
+  const out = toSlackMrkdwn("```\nlog at 2026-10-22T17:23:00Z error\n```");
+  assert.ok(!out.includes("<!date^"), "fenced timestamp untouched");
+});

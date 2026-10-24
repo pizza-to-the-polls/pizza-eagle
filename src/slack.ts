@@ -32,6 +32,20 @@ export function toSlackMrkdwn(md: string): string {
         /(?:^|\n)((?:[ \t]*\|[^\n]*\|[ \t]*(?:\n|$))+)/g,
         (block) => `\n\`\`\`\n${block.trim()}\n\`\`\`\n`,
       );
+
+      // Slack date formatting: render ISO timestamps in each reader's
+      // native timezone via <!date^epoch^pattern|fallback>. Detects
+      // UTC ISO stamps (e.g. 2026-10-22T17:23:00Z) emitted by logs, DB
+      // results, and pi's answers. Fenced/code timestamps untouched.
+      part = part.replace(
+        /(^|[\s(])(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})(?::\d{2})?(?:\.\d+)?Z?(?=$|[\s,.;:!?)]|$)/g,
+        (_m, pre, y, mo, d, hh, mm) => {
+          const epoch = Math.floor(Date.UTC(+y, +mo - 1, +d, +hh, +mm) / 1000);
+          if (Number.isNaN(epoch)) return _m;
+          return `${pre}<!date^${epoch}^{date_short_pretty} at {time}|${y}-${mo}-${d} ${hh}:${mm} UTC>`;
+        },
+      );
+
       return part
         .replace(/^#{1,6}\s+(.+)$/gm, (_m, t) => `*${String(t).trim()}*`)
         .replace(/\*\*([^*\n]+)\*\*/g, (_m, t) => `*${t}*`)
