@@ -191,4 +191,4 @@ Resources:
                 Action: [rds-data:ExecuteStatement, rds-data:BatchExecuteStatement,
                          rds-data:BeginTransaction, rds-data:CommitTransaction,
                          rds-data:RollbackTransaction, rds-data:DescribeStatement]
-                Resource: !Sub "arn:aws:rds:${AWS::Region}:${AWS::AccountId}:cluster/pizzabase"
+                Resource: "*"  # rds-data resource model is unusual — cluster-scoped grants evaluate as implicitDeny; the role-level repo scoping is the boundary
