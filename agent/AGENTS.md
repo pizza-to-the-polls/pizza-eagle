@@ -44,8 +44,8 @@ thread humans read.
   node scripts/ga.mjs report --dim date --metric sessions --metric screenPageViews --start 7d
   node scripts/ga.mjs report --dim pagePath --metric screenPageViews --filter pagePath=/donate --start 30d --limit 20
   ```
-- **GitHub** (`gh`): repos `pizza-to-the-polls/pizzabase`, `pizza-to-the-polls/polls.pizza`.
-- Source checkouts: `~/Projects/pizzabase`, `~/Projects/polls.pizza`.
+- **GitHub** (`gh`): repos `pizza-to-the-polls/pizzabase`, `pizza-to-the-polls/polls.pizza`, `pizza-to-the-polls/feedflag`.
+- Source checkouts: `~/Projects/pizzabase`, `~/Projects/polls.pizza`, `~/Projects/feedflag`.
 - **Opening PRs (P4 capability — only when the user asks for a code change
   or asks you to open a PR):** you act as the GitHub App `pizza-eagle-agent`.
   Mint a scoped 1-hour installation token first:
@@ -64,11 +64,58 @@ thread humans read.
 - CI debugging: with `GH_TOKEN` set, `gh pr checks <n>`, `gh run view --log-failed`
   show why checks/deploys failed; you may push fixes to your own PR branches.
 
-## Schema quick reference (14 tables)
+## feedflag pipeline (social + gov wait-times)
+
+feedflag is the social-feed classifier + official wait-time tracker.
+It writes to the same pizzabase cluster you already read —
+`feed_observations` (all pipeline output) and `wait_time_sources`
+(seed registry; the plan doc is `GOVT_WAIT_TIME_SOURCES_PLAN.md` in `~/Projects`).
+
+**Schema (feed_observations):** `id, created_at, domain` (`social` | `govt` |
+`crowd`), `source_ref` (stable per-site key, e.g. `url#POLL_CODE`), `url`,
+`author`, `platform` (`instagram` | `x` | `tiktok` | `govt`), `observed_at`,
+`posted_at`, `location` (JSONB: raw/city/county/state), `signal_kind`
+(`poll_line_report` | `wait_time_reading` | `press_mention` | `irrelevant` | …),
+`wait_minutes`, `wait_category`, `confidence` (0–1), `provider`
+(classifier that scored it), `relevant`, `description` (JSONB — caption +
+image descriptions: the classifier's *evidence*).
+
+**Useful queries:**
+```sql
+-- lines over an hour right now (gov sources)
+SELECT domain, author, signal_kind, wait_minutes, location->>'state'
+FROM feed_observations
+WHERE wait_minutes >= 60 AND observed_at > now() - interval '2 hours'
+ORDER BY observed_at DESC LIMIT 20;
+
+-- why was this post flagged? (the classifier's evidence)
+SELECT description->>'caption', description->'image_descriptions', confidence, provider
+FROM feed_observations WHERE url LIKE '%<slug>%';
+
+-- a handle's history through the pipeline
+SELECT signal_kind, confidence, observed_at FROM feed_observations
+WHERE author = '@handle' ORDER BY observed_at DESC LIMIT 10;
+```
+
+**Label feedback (volunteer says "that flag was wrong/right" in a thread):**
+1. Look up the observation: `SELECT id, url, signal_kind, confidence FROM
+   feed_observations WHERE url LIKE '%<post-id>%' OR author = '@handle'`.
+2. Map the post to its short label ID (8-hex, from the findings digest:
+   `gh issue view 5 -R pizza-to-the-polls/feedflag` — table column `ID`).
+3. Open a **draft PR** on `pizza-to-the-polls/feedflag` appending one line to
+   `data/labels.jsonl`:
+   `{"id":"<8hex>","verdict":"wrong|right","correct_category":"<if known>","note":"<from the thread>","labeled_at":"<now>","via":"pizza-eagle"}`
+   — same P4 rules as any PR: draft only, never merge, never push to main.
+4. Reply in-thread: labeled + PR link + "a human merges".
+
+The pipeline also reads 👍/👎 reactions in `#feed-lines` directly — if the
+volunteer can react there instead, that's the cheaper path; say so.
+
+## Schema quick reference (16 tables)
 
 `reports`, `locations`, `orders`, `trucks`, `uploads`, `clips`,
-`donations`, `actions`, `api_keys`, `banned_phone_numbers`,
-`integration_sessions`, `links`, `link_clicks`, `migrations`.
+`donations`, `actions`, `api_keys`, `banned_phone_numbers`, `feed_observations`,
+`integration_sessions`, `links`, `link_clicks`, `wait_time_sources`, `migrations`.
 
 Useful relations: `reports.upload_id → uploads.id`,
 `uploads.location_id → locations.id`, `reports.location_id → locations.id`.
@@ -83,6 +130,8 @@ Useful relations: `reports.upload_id → uploads.id`,
   Check `pg_stat_activity`-style context: log durations correlate
   (`START`/`REPORT RequestId` lines) — match by timestamp window.
 - **MMS replies**: `uploads.source = 'mms'`, linked via `uploads.report_id`.
+- **Feed-flag questions**: "what lines are long right now" -> feed_observations
+  (wait_minutes >= 60, recent); "why was @x flagged" -> description JSONB evidence.
 - **Bans**: `banned_phone_numbers` (note: `retool` DB role cannot read it — only API path).
 - Times: DB is UTC; US polling places are CT (UTC-5/-6). Slack timestamps
   are epoch seconds.
