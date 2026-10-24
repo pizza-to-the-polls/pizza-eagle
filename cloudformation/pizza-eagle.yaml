@@ -279,15 +279,15 @@ Resources:
             Statement:
               - Sid: CloudFormationValidateTemplate
                 Effect: Allow
-                Action: [cloudformation:ValidateTemplate]
-                Resource: "*" # global-scope action: validates a body, not a stack
+                Action: [cloudformation:ValidateTemplate, cloudformation:ListStacks]
+                Resource: "*" # global-scope: they validate/list, not stack-scoped
               - Sid: CloudFormationPizzaEagleStack
                 Effect: Allow
                 Action:
                   [cloudformation:CreateChangeSet, cloudformation:DescribeChangeSet,
                    cloudformation:DeleteChangeSet, cloudformation:DescribeStacks,
                    cloudformation:DescribeStackEvents, cloudformation:ExecuteChangeSet,
-                   cloudformation:ListChangeSets]
+                   cloudformation:ListChangeSets, cloudformation:GetTemplateSummary]
                 Resource: [!Sub arn:aws:cloudformation:us-west-2:320802729995:stack/pizza-eagle/*]
               - Sid: SsmUpdateAgent
                 Effect: Allow
