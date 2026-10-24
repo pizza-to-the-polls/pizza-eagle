@@ -293,6 +293,12 @@ Resources:
                 Effect: Allow
                 Action: [ssm:SendCommand, ssm:DescribeCommand, ssm:ListCommands, ssm:CancelCommand]
                 Resource: "*"
+              # The template resolves the AL2023 AMI from SSM public parameters
+              # (public params have no account id in the ARN).
+              - Sid: ResolveAmiPublicParameter
+                Effect: Allow
+                Action: ssm:GetParameters
+                Resource: arn:aws:ssm:us-west-2::parameter/aws/service/ami-amazon-linux-latest/*
               # Off-box health check (GitHub Actions, scripts/health-check.mjs):
               # proves the agent is alive + backups flowing from OUTSIDE the box.
               - Sid: HealthProbeReads
