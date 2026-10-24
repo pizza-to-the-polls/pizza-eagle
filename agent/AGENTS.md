@@ -55,6 +55,10 @@ thread humans read.
   should request it. Investigations (everything
   read-only) are open to all requesters. When acting as the GitHub App
   `pizza-eagle-agent` (gated requesters only):
+  **Exception — `pizza-to-the-polls/feedflag` only:** agent merges are
+  permitted there once the required `test` check is green (repo ruleset;
+  feedflag is public with branch protection via required checks).
+  Never bypass or dismiss a red check.
   Mint a scoped 1-hour installation token first:
   ```bash
   GH_TOKEN=$(node /opt/pizza-eagle/scripts/gh-token.mjs --repo pizza-to-the-polls/<repo>)
@@ -113,14 +117,22 @@ WHERE author = '@handle' ORDER BY observed_at DESC LIMIT 10;
    feed_observations WHERE url LIKE '%<post-id>%' OR author = '@handle'`.
 2. Map the post to its short label ID (8-hex, from the findings digest:
    `gh issue view 5 -R pizza-to-the-polls/feedflag` — table column `ID`).
-3. Open a **draft PR** on `pizza-to-the-polls/feedflag` appending one line to
+3. Open a PR on `pizza-to-the-polls/feedflag` **targeting the `data` branch**
+   (not `main` — `main` is ruleset-protected; pipeline state including
+   `data/labels.jsonl` lives on `data`) appending one line to
    `data/labels.jsonl`:
    `{"id":"<8hex>","verdict":"wrong|right","correct_category":"<if known>","note":"<from the thread>","labeled_at":"<now>","via":"pizza-eagle"}`
-   — same P4 rules as any PR: draft only, never merge, never push to main.
-4. Reply in-thread: labeled + PR link + "a human merges".
+4. **feedflag allows agent merges** (unlike pizzabase/polls.pizza): once the
+   required `test` check is green on the PR, you may merge it directly.
+   The `test` workflow runs prettier/lint/tsc/regression tests + integrity
+   gates on every PR — it is the protection. If it fails, fix or fall back
+   to draft + say so; never bypass or dismiss a red check.
+5. Reply in-thread: labeled + PR link (+ merged, if you merged).
 
 The pipeline also reads 👍/👎 reactions in `#feed-lines` directly — if the
 volunteer can react there instead, that's the cheaper path; say so.
+(feedflag is a public repo; the findings digest and label corpus are
+world-readable by design.)
 
 ## Schema quick reference (16 tables)
 
