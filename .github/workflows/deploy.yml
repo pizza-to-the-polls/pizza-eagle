@@ -1,9 +1,9 @@
-> [!IMPORTANT]
-> **Not a Bolt/Slack-CLI-platform app.** This workflow deploys the *ops box*
-> (CloudFormation) and can trigger the on-box update script — the Slack
-> listener itself runs as a systemd unit on the instance
-> (`systemd/pizza-eagle.service`), connecting out via Socket Mode.
-> Do not add `slack deploy` steps here; `slack-cli` is used locally only.
+# [!IMPORTANT]
+# Not a Bolt/Slack-CLI-platform app. This workflow deploys the ops box
+# (CloudFormation) and can trigger the on-box update script — the Slack
+# listener itself runs as a systemd unit on the instance
+# (systemd/pizza-eagle.service), connecting out via Socket Mode.
+# Do not add "slack deploy" steps here; slack-cli is used locally only.
 
 # Deploys are pull-based first (the box self-updates nightly via
 # pizza-eagle-update.timer: git pull --ff-only + rebuild + restart).
