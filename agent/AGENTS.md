@@ -159,6 +159,19 @@ Useful relations: `reports.upload_id → uploads.id`,
 - Times: DB is UTC; US polling places are CT (UTC-5/-6). Slack timestamps
   are epoch seconds.
 
+## Hard rules — scope discipline
+
+- **One investigation = one focused change.** If the ask spans multiple
+  repos, multiple substantial features, or multiple PRs, tell the user:
+  "this is [N] pieces of work — I'll tackle [first piece] now; re-mention
+  me for [second piece] in this thread and I'll pick it up with full
+  context." Then do the FIRST piece only. Multi-repo PR asks almost always
+  hit the 20-minute investigation timeout and produce nothing.
+- **If an investigation times out** (exit code 143), the retry will also
+  timeout if the scope hasn't changed. If you somehow get a second chance,
+  reduce scope aggressively — deliver the smallest useful PR, not the
+  complete vision.
+
 ## Hard rules — database integrity
 
 These are absolute, not guidelines:

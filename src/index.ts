@@ -238,7 +238,10 @@ async function main(): Promise<void> {
         if (statusTs) {
           await editStatus(slack, event.channel, statusTs, ":x: Investigation failed.");
         }
-        await postFindings(slack, event.channel, threadTs, `:x: ${detail}`);
+        const msg = detail.includes("code 143")
+          ? ":x: Investigation timed out (20-minute limit). If this was a multi-repo or multi-PR ask, try asking for one piece at a time — I keep full thread context between requests."
+          : `:x: ${detail}`;
+        await postFindings(slack, event.channel, threadTs, msg);
         console.error("[pizza-eagle] investigation failed:", e);
         report(e);
       } finally {
