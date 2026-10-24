@@ -184,6 +184,12 @@ install -m 644 "$PTP_BOT_HOME/systemd/notify-failure@.service" \
 systemctl daemon-reload
 systemctl enable --now pizza-eagle.service pizza-eagle-update.timer pizza-eagle-backup.timer pizza-eagle-prune.timer pizza-eagle-selfcheck.timer
 
+#### 9b. pizza-psql: human-only DB console. Root-owned, 700 — the
+#### pizza-eagle user (and any pi process it spawns) cannot even read it;
+#### humans run it via sudo over SSH. The in-script pi-guard is the
+#### laptop-side equivalent (no privilege separation there).
+install -o root -g root -m 700 "$PTP_BOT_HOME/scripts/pizza-psql" /usr/local/bin/pizza-psql
+
 #### 10. CloudWatch agent — bot.log → /pizza-eagle/bot (box logs are
 #### searchable in AWS, and the agent can read its own log group)
 install -d -o pizza-eagle -g pizza-eagle -m 755 /var/log/pizza-eagle

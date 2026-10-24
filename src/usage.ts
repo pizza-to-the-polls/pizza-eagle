@@ -11,11 +11,12 @@ import { appendFileSync, readFileSync } from "node:fs";
 
 export interface UsageEvent {
   ts: string;          // ISO
-  event: "question" | "token-mint" | "publish";
+  event: "question" | "token-mint" | "publish" | "flag";
   requester?: string;   // Slack member id (questions) — mints carry the repo
   channel?: string;
   case?: string;        // case id prefix
-  detail?: string;      // repo / slug for mints + publishes
+  detail?: string;      // repo / slug for mints + publishes; reasons for flags
+  rule?: string;        // suspicion rule name (flag events)
 }
 
 export function appendUsage(stateDir: string, ev: UsageEvent): void {

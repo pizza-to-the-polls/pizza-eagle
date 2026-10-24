@@ -12,11 +12,13 @@ import { mkdirSync, writeFileSync } from "node:fs";  // mkdir: thread-context wr
 import { execFile } from "node:child_process";
 import { join } from "node:path";
 import { appendUsage, withinDailyCap } from "./usage.js";
+import { evaluateSuspicion } from "./suspicion.js";
 
 // File logs (bot.log) carry no journald timestamps — stamp our own.
 const log = (msg: string) => console.log(`[${new Date().toISOString()}] ${msg}`);
 import { randomUUID } from "node:crypto";
 import { loadConfig } from "./config.js";
+import type { Config } from "./config.js";
 import { ThreadStore, workdirFor, type ThreadRecord } from "./store.js";
 import Bugsnag from "@bugsnag/js";
 import { editStatus, fetchThreadContext, postFindings, postStatus, react, stripMention } from "./slack.js";
@@ -56,6 +58,29 @@ function report(e: unknown): void {
   // the runtime default export has .notify (verified by the Bugsnag smoke).
   const bs = Bugsnag as unknown as { notify?: (e: unknown) => void };
   try { bs.notify?.(e); } catch { /* not started */ }
+}
+
+/** Post a real-time suspicious-request alert to the ops channel. */
+async function alertSuspicious(
+  slack: import("@slack/web-api").WebClient,
+  cfg: Config,
+  event: { user: string; channel: string; ts: string },
+  sus: import("./suspicion.js").Suspicion,
+): Promise<void> {
+  const alertChannel = process.env.SLACK_ALERT_CHANNEL;
+  if (!alertChannel) return;
+  const permalink = `https://pizzatothepolls.slack.com/archives/${event.channel}/p${event.ts.replace(".", "")}`;
+  try {
+    await slack.chat.postMessage({
+      channel: alertChannel,
+      text:
+        `:rotating_light: <@U2ZLJ2KBP> *suspicious request* from <@${event.user}>` +
+        ` — \`${sus.rule}\`: ${sus.reasons.join("; ")}
+${permalink}`,
+    });
+  } catch (e) {
+    console.warn("[pizza-eagle] suspicion alert post failed:", (e as Error).message);
+  }
 }
 
 async function main(): Promise<void> {
@@ -127,6 +152,12 @@ async function main(): Promise<void> {
         event.thread_ts ?? event.ts,
         `:zzz: <@${event.user}> you've hit today's question cap (${cap.cap}/day) — back tomorrow, or ask an admin to raise it.`,
       );
+      const capFlag = evaluateSuspicion(cfg.stateDir, event.user, question, { capRefusal: true });
+      if (capFlag) {
+        appendUsage(cfg.stateDir, { ts: new Date().toISOString(), event: "flag",
+          requester: event.user, rule: "cap", detail: capFlag.reasons.join("; ") });
+        void alertSuspicious(slack, cfg, event, capFlag);
+      }
       return;
     }
     appendUsage(cfg.stateDir, {
@@ -136,6 +167,16 @@ async function main(): Promise<void> {
       channel: event.channel,
       case: record.sessionId.slice(0, 8),
     });
+
+    // Real-time suspicion detector: ledger-only on first offense, alerts on
+    // repetition (or always for cap probes). The behavioral layer (masking,
+    // refusals) answers the requester; this tells the operator.
+    const sus = evaluateSuspicion(cfg.stateDir, event.user, question);
+    if (sus) {
+      appendUsage(cfg.stateDir, { ts: new Date().toISOString(), event: "flag",
+        requester: event.user, rule: sus.rule, detail: sus.reasons.join("; ") });
+      if (sus.alert) void alertSuspicious(slack, cfg, event, sus);
+    }
 
     // Thread review: pull the whole conversation the mention landed in so
     // the investigation sees prior discussion (needs channels:history on the
