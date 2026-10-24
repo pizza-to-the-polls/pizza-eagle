@@ -11,6 +11,10 @@ import { WebClient } from "@slack/web-api";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { join } from "node:path";
+import { appendUsage, withinDailyCap } from "./usage.js";
+
+// File logs (bot.log) carry no journald timestamps — stamp our own.
+const log = (msg: string) => console.log(`[${new Date().toISOString()}] ${msg}`);
 import { randomUUID } from "node:crypto";
 import { loadConfig } from "./config.js";
 import { ThreadStore, workdirFor, type ThreadRecord } from "./store.js";
@@ -112,6 +116,26 @@ async function main(): Promise<void> {
         lastRunAt: new Date().toISOString(),
         lastAnswer: null,
       } as ThreadRecord);
+
+    // Usage ledger + anti-abuse guardrail: one line per question (audit
+    // trail), and a polite in-thread refusal past the daily per-user cap.
+    const cap = withinDailyCap(cfg.stateDir, event.user);
+    if (!cap.ok) {
+      await postStatus(
+        slack,
+        event.channel,
+        event.thread_ts ?? event.ts,
+        `:zzz: <@${event.user}> you've hit today's question cap (${cap.cap}/day) — back tomorrow, or ask an admin to raise it.`,
+      );
+      return;
+    }
+    appendUsage(cfg.stateDir, {
+      ts: new Date().toISOString(),
+      event: "question",
+      requester: event.user,
+      channel: event.channel,
+      case: record.sessionId.slice(0, 8),
+    });
 
     // Thread review: pull the whole conversation the mention landed in so
     // the investigation sees prior discussion (needs channels:history on the
@@ -220,7 +244,7 @@ async function main(): Promise<void> {
       "--region", "us-west-2",
     ], (e) => {
       if (e) console.warn("[pizza-eagle] heartbeat emit failed (will retry):", (e as Error).message);
-      else console.log("[pizza-eagle] heartbeat");
+      else log("[pizza-eagle] heartbeat");
     });
   }, 5 * 60_000);
   heartbeat.unref?.();

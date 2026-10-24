@@ -35,5 +35,7 @@ git -C "$WORK/hr" "${GITID[@]}" commit -q -m "$MSG"
 git -C "$WORK/hr" -c http.extraheader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')" \
   push -q origin HEAD:refs/heads/main
 
+echo "{"ts": "$(date -u +%Y-%m-%dT%H:%M:%SZ)", "event": "publish", "detail": "$SLUG"}" \
+  >> "${USAGE_LOG:-/opt/pizza-eagle/state/usage.jsonl}"
 echo "published: https://pizza-to-the-polls.github.io/hotnready/$SLUG/"
 echo "(GitHub Pages rebuilds in ~1-2 minutes)"

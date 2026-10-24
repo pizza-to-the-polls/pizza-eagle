@@ -20,6 +20,18 @@
  */
 import { execFileSync } from "node:child_process";
 import { createSign } from "node:crypto";
+import { appendFileSync } from "node:fs";
+
+// Audit ledger: every mint IS a write-power use (PRs, hotnready publishes).
+// Best-effort — a ledger failure must never block a legitimate mint.
+function logMint(repo) {
+  try {
+    appendFileSync(
+      process.env.USAGE_LOG ?? "/opt/pizza-eagle/state/usage.jsonl",
+      JSON.stringify({ ts: new Date().toISOString(), event: "token-mint", detail: repo }) + "\n",
+    );
+  } catch { /* laptop/dev or missing dir — fine */ }
+}
 
 const API = "https://api.github.com";
 const PEM_SECRET = "ptp/prod/pizza-eagle/gh-app-key";
@@ -90,6 +102,7 @@ async function main() {
   if (argv[0] === "--repo" && argv[1]) {
     const inst = await gh(`/repos/${argv[1]}/installation`, { token: jwt });
     installationId = inst.id;
+    logMint(argv[1]);
   } else if (argv[0] === "--installation" && argv[1]) {
     installationId = argv[1];
   } else {
