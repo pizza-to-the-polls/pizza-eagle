@@ -30,7 +30,9 @@ on:
     inputs:
       target:
         description: "deploy (CFN) | update-agent (SSM) | both"
-        default: "update-agent"
+        type: choice
+        options: [update-agent, deploy, both]
+        default: update-agent
         required: false
 
 permissions:
