@@ -1,4 +1,6 @@
 AWSTemplateFormatVersion: "2010-09-09"
+# OIDC deploy test poke (2026-10-24): trivial change to exercise the
+# GitHub-OIDC deploy path end-to-end.
 Description: >
   pizza-eagle — the PTP ops box (bot host + Retool tunnel endpoint).
   Deploy the RENDERED template (build/pizza-eagle.rendered.yaml from
