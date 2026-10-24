@@ -183,3 +183,12 @@ Resources:
                 Action: [cloudwatch:PutMetricAlarm, cloudwatch:DescribeAlarms,
                          cloudwatch:DeleteAlarms, cloudwatch:TagResource]
                 Resource: "*"
+              # RDS Data API: TypeORM migrations run via the Data API
+              # (typeorm-aurora-data-api-driver) — needs ExecuteStatement
+              # on the cluster + GetSecretValue on the DB secret
+              - Sid: RdsDataForMigrations
+                Effect: Allow
+                Action: [rds-data:ExecuteStatement, rds-data:BatchExecuteStatement,
+                         rds-data:BeginTransaction, rds-data:CommitTransaction,
+                         rds-data:RollbackTransaction, rds-data:DescribeStatement]
+                Resource: !Sub "arn:aws:rds:${AWS::Region}:${AWS::AccountId}:cluster/pizzabase"
