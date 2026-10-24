@@ -39,10 +39,14 @@ Parameters:
     Type: String
     Default: sg-0e176dd57d8b04bde
     Description: SG on the pizzabase Aurora cluster — bastion duty needs 5432 egress to it (Retool tunnel + human psql)
-  AlarmEmail:
+  SlackAlarmChannel:
     Type: String
     Default: ""
-    Description: Email for heartbeat/liveness alarms (a CloudWatch alarm fires when the bot stops emitting its 5-min heartbeat). Leave empty to create the alarm without notifications.
+    Description: Channel ID for liveness alerts (heartbeat-silence alarm posts here via a tiny SNS->Lambda forwarder, tagging SlackAlarmUser). Slack app must be a member.
+  SlackAlarmUser:
+    Type: String
+    Default: U2ZLJ2KBP
+    Description: Slack member id tagged in liveness alerts
   BackupBucketName:
     Type: String
     Description: S3 bucket for nightly state backups (sessions/case history). Empty string disables the grant.
@@ -50,7 +54,6 @@ Parameters:
 
 Conditions:
   HasBackupBucket: !Not [!Equals [!Ref BackupBucketName, ""]]
-  HasAlarmEmail: !Not [!Equals [!Ref AlarmEmail, ""]]
 
 Resources:
   BotRole:
@@ -243,16 +246,106 @@ Resources:
   # Liveness: the bot emits a pizza-eagle/Heartbeat metric every 5 min
   # (src/index.ts); this alarm fires when it goes silent — "systemd active"
   # alone can't see a hung socket.
+  # SNS -> Lambda -> Slack forwarder: the alert path must live OUTSIDE the
+  # box (a dead box can't report its own death). Reads SLACK_BOT_TOKEN from
+  # the env secret at invoke; posts to SlackAlarmChannel tagging SlackAlarmUser.
   HeartbeatAlarmTopic:
     Type: AWS::SNS::Topic
-    Condition: HasAlarmEmail
-  HeartbeatAlarmSub:
+  AlarmForwarderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - { Effect: Allow, Principal: { Service: lambda.amazonaws.com }, Action: sts:AssumeRole }
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: read-bot-secret
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - { Effect: Allow, Action: secretsmanager:GetSecretValue, Resource: !Ref BotSecretArn }
+              - Effect: Allow
+                Action: [ssm:GetParameter, ssm:PutParameter, ssm:DeleteParameter]
+                Resource: !Sub arn:aws:ssm:us-west-2:320802729995:parameter/pizza-eagle/alarm-thread-ts
+  AlarmForwarder:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: pizza-eagle-alarm-forwarder
+      Runtime: nodejs22.x
+      Handler: index.handler
+      Timeout: 15
+      Role: !GetAtt AlarmForwarderRole.Arn
+      Environment:
+        Variables:
+          SECRET_ID: !Ref BotSecretArn
+          SLACK_CHANNEL: !Ref SlackAlarmChannel
+          SLACK_USER: !Ref SlackAlarmUser
+      Code:
+        ZipFile: |
+          // Alarm-state transitions only notify ONCE per change (CloudWatch
+          // semantics), so "post once when down" is inherent. The recovery
+          // post REPLYs to the original alert: its ts is kept in an SSM
+          // bookmark until the thread is closed.
+          const { SecretsManagerClient, GetSecretValueCommand } = require("@aws-sdk/client-secrets-manager");
+          const { SSMClient, GetParameterCommand, PutParameterCommand, DeleteParameterCommand } = require("@aws-sdk/client-ssm");
+          const sm = new SecretsManagerClient({});
+          const ssm = new SSMClient({});
+          const TS_KEY = "/pizza-eagle/alarm-thread-ts";
+
+          exports.handler = async (event) => {
+            const m = JSON.parse(event.Records[0].Sns.Message);
+            const state = m.NewStateValue; // ALARM | OK
+            const env = JSON.parse(
+              (await sm.send(new GetSecretValueCommand({ SecretId: process.env.SECRET_ID }))).SecretString
+            );
+            const post = (payload) => fetch("https://slack.com/api/chat.postMessage", {
+              method: "POST",
+              headers: { Authorization: `Bearer ${env.SLACK_BOT_TOKEN}`, "Content-Type": "application/json" },
+              body: JSON.stringify({ channel: process.env.SLACK_CHANNEL, ...payload }),
+            }).then((r) => r.json());
+
+            if (state === "ALARM") {
+              const j = await post({
+                text:
+                  `:rotating_light: <@${process.env.SLACK_USER}> *pizza-eagle liveness*: ` +
+                  "`" + m.AlarmName + "` is now *ALARM*\n" + (m.NewStateReason || "") +
+                  "\n_The bot's heartbeat went silent — check `ssh ptp-ops` / " +
+                  "`journalctl -u pizza-eagle` / the CloudWatch console. Recovery will reply here._",
+              });
+              if (!j.ok) throw new Error("slack post failed: " + j.error);
+              await ssm.send(new PutParameterCommand({
+                Name: TS_KEY, Value: j.ts, Type: "String", Overwrite: true,
+              }));
+            } else if (state === "OK") {
+              let parent;
+              try {
+                parent = (await ssm.send(new GetParameterCommand({ Name: TS_KEY }))).Parameter.Value;
+              } catch { return; } // recovery with no prior alert post — nothing to reply to
+              const j = await post({
+                thread_ts: parent,
+                text:
+                  ":large_green_circle: *Self-healed* — `" + m.AlarmName + "` is back to OK.\n" +
+                  (m.NewStateReason || ""),
+              });
+              await ssm.send(new DeleteParameterCommand({ Name: TS_KEY }));
+              if (!j.ok) throw new Error("slack reply failed: " + j.error);
+            }
+          };
+  AlarmForwarderSub:
     Type: AWS::SNS::Subscription
-    Condition: HasAlarmEmail
     Properties:
       TopicArn: !Ref HeartbeatAlarmTopic
-      Protocol: email
-      Endpoint: !Ref AlarmEmail
+      Protocol: lambda
+      Endpoint: !GetAtt AlarmForwarder.Arn
+  AlarmForwarderPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref AlarmForwarder
+      Action: lambda:InvokeFunction
+      Principal: sns.amazonaws.com
+      SourceArn: !Ref HeartbeatAlarmTopic
   HeartbeatAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
@@ -266,7 +359,8 @@ Resources:
       ComparisonOperator: LessThanThreshold
       Threshold: 1
       TreatMissingData: breaching
-      AlarmActions: !If [HasAlarmEmail, [!Ref HeartbeatAlarmTopic], !Ref "AWS::NoValue"]
+      AlarmActions: [!Ref HeartbeatAlarmTopic]
+      OKActions: [!Ref HeartbeatAlarmTopic]
 
   OpsASG:
     Type: AWS::AutoScaling::AutoScalingGroup
