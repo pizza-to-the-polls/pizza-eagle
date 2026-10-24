@@ -8,7 +8,7 @@
 
 import { SocketModeClient } from "@slack/socket-mode";
 import { WebClient } from "@slack/web-api";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";  // mkdir: thread-context writes precede runInvestigation's own mkdir
 import { execFile } from "node:child_process";
 import { join } from "node:path";
 import { appendUsage, withinDailyCap } from "./usage.js";
@@ -164,7 +164,12 @@ async function main(): Promise<void> {
       await react(slack, event.channel, threadTs, "pizza-eagle-working", true);
       try {
         if (threadContext) {
-          // refresh on every run so follow-ups see the newest replies
+          // refresh on every run so follow-ups see the newest replies.
+          // mkdir first: a thread reply can be the FIRST mention of a case
+          // (e.g. replying to the self-check digest) — the workdir doesn't
+          // exist until runInvestigation creates it, and writeFileSync
+          // cannot create parents (ENOENT crash, found in the wild).
+          mkdirSync(record.workdir, { recursive: true });
           writeFileSync(join(record.workdir, "thread-context.md"), threadContext + "\n");
         }
         const { answer } = await runInvestigation(cfg, {
