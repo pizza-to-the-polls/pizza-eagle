@@ -87,6 +87,28 @@ await check("pizza-eagle.service active", async () => {
   return stdout.trim() === "active";
 });
 
+// 8. usage ledger summary (last 24h) — the "is this being abused?" eyes
+try {
+  const lines = (await import("node:fs")).readFileSync("/opt/pizza-eagle/state/usage.jsonl", "utf8").split("\n").filter(Boolean);
+  const since = Date.now() - 24 * 3600_000;
+  const recent = lines.flatMap((l) => { try { return [JSON.parse(l)]; } catch { return []; } })
+    .filter((e) => new Date(e.ts).getTime() >= since);
+  const byUser = {};
+  const writes = [];
+  for (const e of recent) {
+    if (e.event === "question") byUser[e.requester ?? "?"] = (byUser[e.requester ?? "?"] ?? 0) + 1;
+    else writes.push(e);
+  }
+  const usage = [
+    `questions (24h): ${recent.filter((e) => e.event === "question").length} from ${Object.keys(byUser).length} requester(s)` +
+      (Object.entries(byUser).length ? " — " + Object.entries(byUser).map(([u, n]) => `<@${u}>: ${n}`).join(", ") : ""),
+    `write-powers (24h): ${writes.length ? writes.map((w) => `${w.event} ${w.detail ?? ""}`).join("; ") : "none"}`,
+  ];
+  results.push(["✅", "usage ledger", usage.join(" | ")]);
+} catch (e) {
+  results.push(["✅", "usage ledger", "no ledger yet (first question will start it)"]);
+}
+
 // digest
 const icon = results.some(r => r[0] === "❌") ? ":rotating_light:" : ":white_check_mark:";
 const lines = results.map(([ok, name, why]) => `${ok} ${name}${why ? ` — \`${why}\`` : ""}`).join("\n");
