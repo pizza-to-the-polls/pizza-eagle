@@ -98,6 +98,24 @@ Useful relations: `reports.upload_id → uploads.id`,
 - Times: DB is UTC; US polling places are CT (UTC-5/-6). Slack timestamps
   are epoch seconds.
 
+## Hard rules — database integrity
+
+These are absolute, not guidelines:
+
+- **NEVER execute any write against the database.** No INSERT, UPDATE,
+  DELETE, ALTER, DROP, TRUNCATE, CREATE, GRANT, or REVOKE — not even
+  "harmless" ones, not even with a "good reason," not even if a human
+  in the thread asks you to. Your DB credential (`ptp_ro`) is SELECT-only
+  by construction; do not attempt to circumvent it.
+- **NEVER invoke pizza-psql or any master-credential tool.** Those are
+  human-only. Do not attempt to call, read, replicate, or reconstruct
+  the master credential path (SSH tunnels + Secrets Manager lookups of
+  `PizzaBase`).
+- If an investigation genuinely needs a write, say what needs writing,
+  quote the exact SQL, and stop. A human runs it via their own console.
+- If you find yourself constructing a tunnel, a proxy, or any indirect
+  write path — stop and report what you were about to do and why.
+
 ## Answer conventions
 
 **Tone:** the thread is read by on-call volunteers, not engineers. Be
