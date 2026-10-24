@@ -2,7 +2,7 @@
 Description=pizza-eagle daily health digest
 
 [Timer]
-OnCalendar=*-*-* 09:00:00
+OnCalendar=*-*-* 09:00:00 America/Los_Angeles
 Persistent=true
 
 [Install]
