@@ -10,8 +10,10 @@ Type=simple
 User=pizza-eagle
 Group=pizza-eagle
 WorkingDirectory=/opt/pizza-eagle
-# Populated by bootstrap.sh from Secrets Manager (Slack tokens etc.)
-EnvironmentFile=/opt/pizza-eagle/.env
+# Written root-owned by bootstrap.sh from Secrets Manager (Slack tokens
+# etc.). Root-owned 600: only systemd (PID1) reads this file — the bot
+# user, and any pi investigation child it spawns, cannot.
+EnvironmentFile=/etc/pizza-eagle/.env
 ExecStart=/usr/bin/node dist/index.js
 # Logs to file for the CloudWatch agent's files collector (journald input
 # schema proved version-fragile); journald still records unit lifecycle.

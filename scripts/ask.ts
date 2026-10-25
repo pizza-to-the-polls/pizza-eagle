@@ -8,10 +8,19 @@
  * Prints the answer to stdout. Same code path as the listener:
  * AGENTS.md context, case-history.md, pi --session-id.
  */
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { loadConfig } from "../src/config.js";
 import { runInvestigation } from "../src/investigate.js";
 import { workdirFor } from "../src/store.js";
+
+/** --session labels are for humans; sessions are UUIDs. Stable per label. */
+function sessionFromLabel(label: string): string {
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(label)) {
+    return label; // already a UUID (e.g. resuming a printed session id)
+  }
+  const h = createHash("sha256").update(`ask:${label}`).digest("hex").slice(0, 32);
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
+}
 
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
@@ -38,7 +47,7 @@ async function main(): Promise<void> {
   }
 
   const cfg = loadConfig();
-  const sessionId = session ?? randomUUID();
+  const sessionId = session ? sessionFromLabel(session) : randomUUID();
   const workdir = workdirFor(cfg.stateDir, `ask_${sessionId.slice(0, 12)}`);
 
   const { answer, durationMs } = await runInvestigation(cfg, {
