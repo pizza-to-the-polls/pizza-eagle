@@ -43,8 +43,8 @@ Parameters:
     Description: SG on the pizzabase Aurora cluster — bastion duty needs 5432 egress to it (Retool tunnel + human psql)
   SlackAlarmChannel:
     Type: String
-    Default: ""
-    Description: Channel ID for liveness alerts (heartbeat-silence alarm posts here via a tiny SNS->Lambda forwarder, tagging SlackAlarmUser). Slack app must be a member.
+    Default: C01CFGKK279
+    Description: Channel ID for liveness alerts (heartbeat-silence alarm posts here via a tiny SNS->Lambda forwarder, tagging SlackAlarmUser). C01CFGKK279 is #dev on the PTP workspace. Slack app must be a member.
   SlackAlarmUser:
     Type: String
     Default: U2ZLJ2KBP
