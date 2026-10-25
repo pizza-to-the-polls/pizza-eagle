@@ -1,6 +1,6 @@
 # Pizza Eagle — Operations Runbook
 
-One page. If Matt's unavailable, this keeps the bird flying.
+One page. If Scott's unavailable, this keeps the bird flying.
 
 ## Is it running?
 
