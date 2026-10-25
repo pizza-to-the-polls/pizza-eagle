@@ -42,24 +42,69 @@ export const activeInvestigations = new Set<ReturnType<typeof spawn>>();
 
 /**
  * Build the argv for one pi run. The question rides as a single positional
- * AFTER `--`: question text may itself start with "-" (Slack users write
- * "<@Pizza Eagle> - question" and stripMention keeps the dash), and pi's
- * CLI parser would otherwise reject it: `Error: Unknown option: - ...` →
- * exit 1 → "Investigation failed." (2026-10-26 #dev thread). `--` ends
- * option parsing, so the question is taken verbatim however it starts.
+ * Question text is user-controlled Slack input riding as the LAST argv
+ * element AFTER `--` (end-of-options): it may itself start with "-"
+ * (Slack users write "<@Pizza Eagle> - question" and stripMention keeps
+ * the dash), and pi's CLI parser would otherwise reject it:
+ * `Error: Unknown option: - ...` → exit 1 → "Investigation failed."
+ * (2026-10-26 #dev thread).
+ *
+ * `--no-approve` DECLINES pi project trust: the cwd (the case workdir)
+ * is pi-writable via pi's own write/bash tools, so a planted
+ * `.pi/extensions/*.ts` would otherwise EXECUTE inside pi on the next
+ * run (`--approve` trusted project-local files; verified on pi 1.4.0:
+ * `pi --print --approve` runs `.pi/extensions` code, `--no-approve`
+ * does not). Also declines project `.pi/mcp.json` (arbitrary MCP
+ * server = subprocess), `.pi/settings.json`, `.pi/skills|prompts|themes`,
+ * and ancestor `.agents/skills`. Operator context is unaffected:
+ * AGENTS.md loads regardless of project trust (verified).
  */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export function piArgs(
   cfg: Config,
   opts: { question: string; sessionId: string },
 ): string[] {
+  if (!UUID_RE.test(opts.sessionId)) {
+    // Bot-generated (randomUUID) in practice, but the value round-trips
+    // through state/threads.json — treat it as untrusted argv input.
+    throw new Error(`invalid session id: ${JSON.stringify(opts.sessionId.slice(0, 64))}`);
+  }
+  if (!opts.question.trim()) {
+    throw new Error("empty question");
+  }
   return [
     "--print",
     "--session-id", opts.sessionId,
     "--session-dir", `${cfg.stateDir}/sessions`,
-    "--approve", // workdir contains only bot-written context files
+    "--no-approve", // decline project trust — see header note
     "--",
     opts.question,
   ];
+}
+
+/**
+ * The pi child inherits this env — its bash tool runs as the bot OS user,
+ * so anything here is one prompt-injected `printenv` away from a Slack
+ * thread. Strip the listener's own Slack credentials (by name, and by
+ * value so aliases can't smuggle them through). Everything else passes:
+ * PATH/HOME, the AWS profile for read-only triage, and the env-keyed
+ * model key pi needs (OPENROUTER_KEY_PIZZA).
+ */
+const BOT_SECRET_ENV = new Set(["SLACK_APP_TOKEN", "SLACK_BOT_TOKEN"]);
+
+export function childEnv(
+  cfg: Config,
+  env: NodeJS.ProcessEnv = process.env,
+): NodeJS.ProcessEnv {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(env)) {
+    if (v === undefined) continue;
+    if (BOT_SECRET_ENV.has(k)) continue; // by name
+    if (v === cfg.slackAppToken || v === cfg.slackBotToken) continue; // by value (aliases)
+    out[k] = v;
+  }
+  return out;
 }
 
 export async function runInvestigation(
@@ -83,7 +128,7 @@ export async function runInvestigation(
   const started = Date.now();
   const child = spawn(cfg.piBin, args, {
     cwd: opts.workdir,
-    env: process.env,
+    env: childEnv(cfg),
     stdio: ["ignore", "pipe", "pipe"],
   });
 
