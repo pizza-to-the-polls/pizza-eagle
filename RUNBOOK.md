@@ -4,8 +4,8 @@ One page. If Matt's unavailable, this keeps the bird flying.
 
 ## Is it running?
 
-- **The #dev channel is the heartbeat** — pizza-eagle answers @mentions. If it's silent for >10 min, the alarm posts to `#feed-pizza-eagle-heartbeat`.
-- **Daily self-check**: runs at 09:00 Pacific, posts a digest to `#feed-pizza-eagle-heartbeat` **only if something fails** (silent when green).
+- **The #dev channel is the heartbeat** — pizza-eagle answers @mentions. If it's silent for >10 min, the alarm posts to `#dev`.
+- **Daily self-check**: runs at 09:00 Pacific, posts a digest to `#dev` **only if something fails** (silent when green).
 - **Off-box health check**: GitHub Actions runs daily at 09:00 Pacific (`.github/workflows/health.yml`), also silent when green.
 - **Quick manual check**: `ssh ptp-ops "systemctl is-active pizza-eagle; journalctl -u pizza-eagle -n 5"`
 
@@ -54,7 +54,7 @@ aws cloudformation deploy --stack-name pizza-eagle \
     "BotSecretArn=$(aws secretsmanager describe-secret --secret-id ptp/prod/pizza-eagle/env --query ARN --output text)" \
     "RdsSecurityGroupId=sg-0e176dd57d8b04bde" \
     "BackupBucketName=pizza-eagle-backups" \
-    "SlackAlarmChannel=<heartbeat-channel-id>"
+    "SlackAlarmChannel=C01CFGKK279"
 ```
 
 The instance self-assembles in ~5 minutes (verified by rebirth drill).
@@ -94,7 +94,7 @@ sudo systemctl restart pizza-eagle
 
 | What | Where |
 |---|---|
-| Heartbeat silence (>10 min) | `#feed-pizza-eagle-heartbeat` — once on ALARM, replies to itself when self-healed |
+| Heartbeat silence (>10 min) | `#dev` — once on ALARM, replies to itself when self-healed |
 | Daily self-check failure | Same channel, full digest |
 | Unit failure (systemd) | Same channel, via bot token |
 | Off-box health check failure | Same channel, from GitHub Actions |
