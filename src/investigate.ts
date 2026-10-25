@@ -40,6 +40,28 @@ export class InvestigationError extends Error {
  */
 export const activeInvestigations = new Set<ReturnType<typeof spawn>>();
 
+/**
+ * Build the argv for one pi run. The question rides as a single positional
+ * AFTER `--`: question text may itself start with "-" (Slack users write
+ * "<@Pizza Eagle> - question" and stripMention keeps the dash), and pi's
+ * CLI parser would otherwise reject it: `Error: Unknown option: - ...` →
+ * exit 1 → "Investigation failed." (2026-10-26 #dev thread). `--` ends
+ * option parsing, so the question is taken verbatim however it starts.
+ */
+export function piArgs(
+  cfg: Config,
+  opts: { question: string; sessionId: string },
+): string[] {
+  return [
+    "--print",
+    "--session-id", opts.sessionId,
+    "--session-dir", `${cfg.stateDir}/sessions`,
+    "--approve", // workdir contains only bot-written context files
+    "--",
+    opts.question,
+  ];
+}
+
 export async function runInvestigation(
   cfg: Config,
   opts: { question: string; sessionId: string; workdir: string; requester?: string },
@@ -56,13 +78,7 @@ export async function runInvestigation(
   const sessionsDir = `${cfg.stateDir}/sessions`;
   mkdirSync(sessionsDir, { recursive: true });
 
-  const args = [
-    "--print",
-    "--session-id", opts.sessionId,
-    "--session-dir", sessionsDir,
-    "--approve", // workdir contains only bot-written context files
-    opts.question,
-  ];
+  const args = piArgs(cfg, opts);
 
   const started = Date.now();
   const child = spawn(cfg.piBin, args, {
