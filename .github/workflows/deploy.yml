@@ -75,11 +75,21 @@ jobs:
       - name: Update agent on the box (SSM)
         if: inputs.target == 'update-agent' || inputs.target == 'both'
         run: |
+          # SSM RunShellScript runs as root; repo steps run as the pizza-eagle
+          # user that owns /opt/pizza-eagle — root's git rejects the repo
+          # ("dubious ownership") and root's npm leaves root-owned artifacts.
+          # Same shape as systemd/pizza-eagle-update.service (the nightly timer).
           aws ssm send-command \
             --document-name "AWS-RunShellScript" \
             --targets "Key=tag:${INSTANCE_TAG_KEY},Values=${INSTANCE_TAG_VALUE}" \
             --comment "pizza-eagle immediate update (same as nightly timer)" \
-            --parameters 'commands=["git -C /opt/pizza-eagle pull --ff-only","dnf update -y nodejs","npm --prefix /opt/pizza-eagle ci --omit=dev","npm --prefix /opt/pizza-eagle run build","systemctl restart pizza-eagle.service","systemctl is-active pizza-eagle.service"]'
+            --parameters 'commands=[
+              "runuser -u pizza-eagle -- env HOME=/home/pizza-eagle git -C /opt/pizza-eagle pull --ff-only",
+              "dnf update -y nodejs",
+              "cd /opt/pizza-eagle && runuser -u pizza-eagle -- env HOME=/home/pizza-eagle /usr/bin/npm ci --omit=dev",
+              "cd /opt/pizza-eagle && runuser -u pizza-eagle -- env HOME=/home/pizza-eagle /usr/bin/npm run build",
+              "systemctl restart pizza-eagle.service",
+              "systemctl is-active pizza-eagle.service"]'
 
       - name: Report
         if: always()

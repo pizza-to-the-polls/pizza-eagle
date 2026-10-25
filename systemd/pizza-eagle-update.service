@@ -1,19 +1,29 @@
 [Unit]
 Description=pizza-eagle update (pull latest agent + listener, rebuild, restart)
+# OnFailure belongs in [Unit] — systemd silently ignores it in [Service]
+# (the 2026-10-24..25 silent nightly failures never alerted for exactly
+# this reason: the key sat in [Service] and every run died quietly).
+OnFailure=notify-failure@%n.service
 
 [Service]
 Type=oneshot
 # npm resolves node_modules/.bin from cwd — must run at the project root
 WorkingDirectory=/opt/pizza-eagle
-# --ff-only: never auto-merge; a diverged repo means the update fails loudly
-# (OnFailure below posts to Slack) and a human looks at it.
-ExecStart=/usr/bin/git -C /opt/pizza-eagle pull --ff-only
+# The service runs as root (dnf needs it), but EVERY step that touches the
+# repo runs as the pizza-eagle user that owns it. Root's git refuses a
+# pizza-eagle-owned repo ("dubious ownership", exit 128) and root's npm
+# leaves root-owned artifacts the next pizza-eagle run can't overwrite —
+# between them they broke every nightly update from 2026-10-24 (box
+# build) to 2026-10-25 while the bot silently stayed on day-1 code.
+# runuser inherits this unit's cwd; git/npm need HOME (npm cache).
+# --ff-only: never auto-merge; a diverged repo means the update fails
+# loudly (OnFailure above posts to Slack) and a human looks at it.
+ExecStart=/usr/sbin/runuser -u pizza-eagle -- env HOME=/home/pizza-eagle git -C /opt/pizza-eagle pull --ff-only
 # Security: pull Node.js patch releases from NodeSource nightly (no-op when
 # current). Critical CVEs (e.g. the Oct 2026 RCE affecting 22.x) otherwise go
 # unpatched until an instance is replaced. Service restart below picks up
 # the new node binary.
 ExecStart=/usr/bin/dnf update -y nodejs
-ExecStart=/usr/bin/npm ci --omit=dev
-ExecStart=/usr/bin/npm run build
+ExecStart=/usr/sbin/runuser -u pizza-eagle -- env HOME=/home/pizza-eagle /usr/bin/npm ci --omit=dev
+ExecStart=/usr/sbin/runuser -u pizza-eagle -- env HOME=/home/pizza-eagle /usr/bin/npm run build
 ExecStartPost=/bin/systemctl restart pizza-eagle.service
-OnFailure=notify-failure@%n.service

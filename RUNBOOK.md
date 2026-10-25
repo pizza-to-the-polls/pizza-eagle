@@ -8,6 +8,12 @@ One page. If Scott's unavailable, this keeps the bird flying.
 - **Daily self-check**: runs at 09:00 Pacific, posts a digest to `#dev` **only if something fails** (silent when green).
 - **Off-box health check**: GitHub Actions runs daily at 09:00 Pacific (`.github/workflows/health.yml`), also silent when green.
 - **Quick manual check**: `ssh ptp-ops "systemctl is-active pizza-eagle; journalctl -u pizza-eagle -n 5"`
+- **Nightly update health**: `ssh ptp-ops "journalctl -u pizza-eagle-update -n 10 --no-pager"` — the
+  04:30 run pulls + rebuilds + restarts; if `git pull`/`npm` lines fail, the bot is
+  silently running stale code. (2026-10-24..25: every nightly failed on root-vs-
+  `pizza-eagle` repo ownership while the bot kept answering on day-1 code.)
+- **Deployed code version**: `ssh ptp-ops "git -c safe.directory=/opt/pizza-eagle -C /opt/pizza-eagle log --oneline -1"`
+  — compare against origin/main; the box should never lag a day behind.
 
 ## Where everything lives
 
