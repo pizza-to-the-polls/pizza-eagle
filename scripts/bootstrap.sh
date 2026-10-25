@@ -51,10 +51,17 @@ mkdir -p /etc/pizza-eagle
 aws secretsmanager get-secret-value --secret-id "${SECRETS_PREFIX}/env" \
   --query SecretString --output text > /etc/pizza-eagle/.env.raw
 # Expect a JSON object of {SLACK_APP_TOKEN, SLACK_BOT_TOKEN, ...}
-jq -r 'to_entries | .[] | "\(.key)=\(.value)"' /etc/pizza-eagle/.env.raw > "$PTP_BOT_HOME/.env"
-chown pizza-eagle:pizza-eagle "$PTP_BOT_HOME/.env"
-chmod 600 "$PTP_BOT_HOME/.env"
+jq -r 'to_entries | .[] | "\(.key)=\(.value)"' /etc/pizza-eagle/.env.raw > /etc/pizza-eagle/.env
+# Root-owned, 600: systemd (PID 1, root) reads EnvironmentFile and injects it
+# into the bot's environment; the pizza-eagle user (and therefore any pi
+# investigation child) can never read the file itself. The old in-app .env
+# (pizza-eagle-owned 600) was readable by the pi child — one prompt-injected
+# `cat .env` from full secret disclosure. Remove it if this box predates
+# the fix (idempotent re-run).
+chown root:root /etc/pizza-eagle/.env
+chmod 600 /etc/pizza-eagle/.env
 rm -f /etc/pizza-eagle/.env.raw
+rm -f "$PTP_BOT_HOME/.env"
 
 #### 5b. GA service account (read-only) — investigations data source
 # scripts/ga.mjs reads this path (GA_SA_JSON default) as the pizza-eagle user.

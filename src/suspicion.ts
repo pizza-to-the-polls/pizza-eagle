@@ -30,8 +30,25 @@ const WRITE_ATTEMPT = [
   /\bforce[- ]?push/i,
 ];
 
+// Secrets-probe phrasing: attempts to make the investigator dump its own
+// credentials (env, .env, /proc environ, token files). These are the
+// prompt-injection precursors to exfiltration; the argv/env hardening in
+// investigate.ts is the boundary, this surfaces the attempt to the operator.
+const SECRETS_PROBE = [
+  /\bprintenv\b/i,
+  /\/proc\/[^\s\/]*\/environ/i,
+  /(^|[^\w])\.env\b/i, // "cat the .env" — not "environment" words
+  /\bshow (me |us )?(the |all |your )*(env(ironment)? vars?|secrets?|tokens?|api keys?)\b/i,
+  /\b(dump|print|reveal|exfiltrate)\b[^.]{0,40}\b(env(ironment)?|secrets?|tokens?|credentials)\b/i,
+  /\bEnvironmentFile\b/i,
+];
+
+// Don't let ops-y phrasing trip SECRETS_PROBE: gated requesters asking
+// "which env var holds X" is legitimate triage, not an exfil attempt.
+// (Rule still ledger-flags so a pattern of probes is visible.)
+
 export interface Suspicion {
-  rule: "cap" | "pii-harvest" | "write-attempt" | "burst";
+  rule: "cap" | "pii-harvest" | "write-attempt" | "burst" | "secrets-probe";
   reasons: string[];
   alert: boolean; // false = ledger-only (first offense / deduped)
 }
@@ -71,6 +88,12 @@ export function evaluateSuspicion(
     reasons.push("PII-seeking phrasing (donor emails / contact dumps)");
     const prior = priorFlags(stateDir, "pii-harvest", requester, 24 * 3600_000);
     return { rule: "pii-harvest", reasons, alert: prior >= 1 }; // 1st silent, 2nd+ alerts
+  }
+
+  if (SECRETS_PROBE.some((re) => re.test(question))) {
+    reasons.push("secrets-probe phrasing (env/.env/token dumps)");
+    const prior = priorFlags(stateDir, "secrets-probe", requester, 24 * 3600_000);
+    return { rule: "secrets-probe", reasons, alert: prior >= 1 }; // 1st silent, 2nd+ alerts
   }
 
   if (!WRITE_GATE.includes(requester) && WRITE_ATTEMPT.some((re) => re.test(question))) {

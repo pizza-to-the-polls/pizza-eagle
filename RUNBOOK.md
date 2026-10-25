@@ -79,6 +79,17 @@ import os; os.remove('/tmp/s.json')
 # then restart the bot (see above)
 ```
 
+**Important**: `/etc/pizza-eagle/.env` is root-owned — a plain restart does
+NOT pick up a rotated secret. Re-fetch it as root first:
+
+```bash
+sudo aws secretsmanager get-secret-value --secret-id ptp/prod/pizza-eagle/env \
+  --query SecretString --output text \
+  | jq -r 'to_entries | .[] | "\(.key)=\(.value)"' > /etc/pizza-eagle/.env
+sudo chmod 600 /etc/pizza-eagle/.env   # owner is already root
+sudo systemctl restart pizza-eagle
+```
+
 ## Alert channels
 
 | What | Where |

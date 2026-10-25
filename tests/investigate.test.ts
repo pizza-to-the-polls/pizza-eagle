@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { appendHistory, piArgs } from "../src/investigate.js";
+import { appendHistory, childEnv, piArgs } from "../src/investigate.js";
 import { stripMention } from "../src/slack.js";
 import type { Config } from "../src/config.js";
 
@@ -35,7 +35,7 @@ test("appendHistory: no requester means no requester line", () => {
 });
 
 test("piArgs: question rides as a positional after `--`", () => {
-  const args = piArgs(cfg, { question: "why did upload 13297 fail?", sessionId: "1792954809.028629" });
+  const args = piArgs(cfg, { question: "why did upload 13297 fail?", sessionId: "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0" });
   const sep = args.indexOf("--");
   assert.ok(sep > 0, "`--` separator present");
   assert.equal(args[sep + 1], "why did upload 13297 fail?", "question is the sole positional");
@@ -50,19 +50,65 @@ test("piArgs: leading-dash question is not parsed as an option (2026-10-26 #dev 
     "<@U0CAH280B6E> - I just tried to submit a report and upload a photo",
   );
   assert.equal(question, "- I just tried to submit a report and upload a photo");
-  const args = piArgs(cfg, { question, sessionId: "s1" });
+  const args = piArgs(cfg, { question, sessionId: "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0" });
   const sep = args.indexOf("--");
   assert.equal(args[sep + 1], question, "question verbatim after --, not eaten as a flag");
   assert.equal(args.lastIndexOf(question), sep + 1, "dashed question sits after --");
 });
 
-test("piArgs: session routing and --approve still precede the separator", () => {
-  const args = piArgs(cfg, { question: "q", sessionId: "thread-42" });
+test("piArgs: session routing and --no-approve precede the separator", () => {
+  const args = piArgs(cfg, { question: "q", sessionId: "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0" });
   const sep = args.indexOf("--");
   assert.deepEqual(args.slice(0, sep), [
     "--print",
-    "--session-id", "thread-42",
+    "--session-id", "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
     "--session-dir", "/var/lib/pizza-eagle/sessions",
-    "--approve",
+    "--no-approve",
   ]);
+});
+
+test("piArgs: --no-approve declines pi project trust (no --approve anywhere)", () => {
+  // A planted .pi/extensions/*.ts in the pi-writable workdir executes on
+  // the next `--approve` run (verified on pi 1.4.0). The bot never needs
+  // project trust: AGENTS.md loads regardless of it.
+  const args = piArgs(cfg, { question: "q", sessionId: "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0" });
+  assert.ok(!args.includes("--approve"), "--approve must not appear (exact match)");
+  assert.ok(!args.some((a) => a.startsWith("--approve")), "no --approve/-a form either");
+  assert.ok(args.includes("--no-approve"), "--no-approve present");
+});
+
+test("piArgs: non-UUID session id is rejected (threads.json is untrusted)", () => {
+  for (const bad of ["--tools=*", "--print x", "1234", "", "../../etc"]) {
+    assert.throws(
+      () => piArgs(cfg, { question: "q", sessionId: bad }),
+      /invalid session id/,
+      `rejects ${JSON.stringify(bad)}`,
+    );
+  }
+  assert.throws(() => piArgs(cfg, { question: "   ", sessionId: "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0" }), /empty question/);
+});
+
+test("childEnv: bot Slack credentials never reach the pi child env", () => {
+  const env = {
+    PATH: "/usr/bin:/bin",
+    HOME: "/home/pizza-eagle",
+    SLACK_APP_TOKEN: cfg.slackAppToken,
+    SLACK_BOT_TOKEN: cfg.slackBotToken,
+    SLACK_TOKEN_ALIAS: cfg.slackBotToken, // same value under a friendlier name
+    OPENROUTER_KEY_PIZZA: "sk-or-xyz", // pi's model key — must pass
+    AWS_PROFILE: "ptp-agent", // read-only triage — must pass
+  };
+  const out = childEnv(cfg, env);
+  assert.equal(out.SLACK_APP_TOKEN, undefined, "app token stripped");
+  assert.equal(out.SLACK_BOT_TOKEN, undefined, "bot token stripped");
+  assert.equal(out.SLACK_TOKEN_ALIAS, undefined, "token alias stripped by value");
+  assert.equal(out.OPENROUTER_KEY_PIZZA, "sk-or-xyz", "model key passes");
+  assert.equal(out.AWS_PROFILE, "ptp-agent", "aws profile passes");
+  assert.equal(out.PATH, "/usr/bin:/bin");
+});
+
+test("childEnv: cfg tokens are stripped even under unknown names", () => {
+  const out = childEnv(cfg, { WHATEVER_HELPER: cfg.slackBotToken, KEEP: "1" });
+  assert.equal(out.WHATEVER_HELPER, undefined, "value match strips aliases");
+  assert.equal(out.KEEP, "1");
 });
