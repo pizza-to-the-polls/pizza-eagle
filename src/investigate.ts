@@ -125,6 +125,13 @@ export async function runInvestigation(
 
   const args = piArgs(cfg, opts);
 
+  // Requester + question land in the case file BEFORE the pi run, so the
+  // AGENTS.md write-gate can verify the requester from Slack event metadata
+  // even on a thread's FIRST question. (2026-10-25 #dev thread: a publish
+  // request rode Q1 and the gate found no entry — entries were previously
+  // appended only after each run.) Best-effort: never fail a run over it.
+  tryHistory(() => openHistory(opts.workdir, opts.question, opts.requester));
+
   const started = Date.now();
   const child = spawn(cfg.piBin, args, {
     cwd: opts.workdir,
@@ -161,14 +168,14 @@ export async function runInvestigation(
   const answer = stdout.trim();
 
   if (timedOut) {
-    appendHistory(opts.workdir, opts.question, "(timed out)", opts.requester);
+    tryHistory(() => closeHistory(opts.workdir, "(timed out)"));
     throw new InvestigationError(
       `Investigation exceeded ${Math.round(cfg.timeoutMs / 60_000)} minutes and was stopped.`,
       stderr,
     );
   }
   if (code !== 0 || !answer) {
-    appendHistory(opts.workdir, opts.question, answer || "(no output)", opts.requester);
+    tryHistory(() => closeHistory(opts.workdir, answer || "(no output)"));
     const tail = stderr.trim().slice(-800);
     throw new InvestigationError(
       `pi exited with code ${code ?? "?"}${signal ? ` (${signal})` : ""}.`,
@@ -176,7 +183,7 @@ export async function runInvestigation(
     );
   }
 
-  appendHistory(opts.workdir, opts.question, answer, opts.requester);
+  tryHistory(() => closeHistory(opts.workdir, answer));
   return { answer, durationMs };
 }
 
@@ -185,19 +192,33 @@ export async function runInvestigation(
  * The requester's Slack member id rides along so AGENTS.md can gate
  * write-powers (PRs, hotnready publishes) to vetted humans while
  * investigations stay open to the whole workspace.
+ *
+ * Two halves: openHistory (Requester + Q) runs BEFORE the pi subprocess —
+ * the write-gate checks the newest entry's Requester line, which must exist
+ * during the run itself, first question included — and closeHistory (answer
+ * + separator) after it. Both best-effort via tryHistory.
  */
-export function appendHistory(
+export function openHistory(
   workdir: string,
   question: string,
-  answer: string,
   requester?: string,
 ): void {
   const stamp = new Date().toISOString();
   const who = requester ? `\n**Requester:** Slack member \`${requester}\`\n` : "\n";
-  appendFileSync(
-    `${workdir}/case-history.md`,
-    `## ${stamp}\n${who}**Q:** ${question}\n\n${answer}\n\n---\n\n`,
-  );
+  appendFileSync(`${workdir}/case-history.md`, `## ${stamp}\n${who}**Q:** ${question}\n\n`);
+}
+
+export function closeHistory(workdir: string, answer: string): void {
+  appendFileSync(`${workdir}/case-history.md`, `${answer}\n\n---\n\n`);
+}
+
+/** Best-effort wrapper: a failed case-file write must never lose an answer. */
+function tryHistory(write: () => void): void {
+  try {
+    write();
+  } catch (e) {
+    console.warn(`[pizza-eagle] case history write failed (continuing): ${(e as Error).message}`);
+  }
 }
 
 function exitOf(child: ReturnType<typeof spawn>): Promise<[number | null, string | null]> {

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { appendHistory, childEnv, piArgs } from "../src/investigate.js";
+import { childEnv, closeHistory, openHistory, piArgs } from "../src/investigate.js";
 import { stripMention } from "../src/slack.js";
 import type { Config } from "../src/config.js";
 
@@ -19,17 +19,25 @@ const cfg = {
   maxConcurrent: 2,
 } satisfies Config;
 
-test("appendHistory: requester id rides into the case file", () => {
+test("case history: requester id rides in BEFORE the run (write-gate can verify on Q1)", () => {
+  // 2026-10-25 #dev thread: a publish request rode a thread's FIRST question
+  // and the gate found no entry — entries were only written after runs.
   const dir = mkdtempSync(join(tmpdir(), "pe-inv-"));
-  appendHistory(dir, "what changed?", "answer", "U2ZLJ2KBP");
-  const out = readFileSync(join(dir, "case-history.md"), "utf8");
-  assert.ok(out.includes("**Requester:** Slack member `U2ZLJ2KBP`"), "requester line present");
-  assert.ok(out.includes("**Q:** what changed?"), "question preserved");
+  openHistory(dir, "make a hotnready site", "U2ZLJ2KBP");
+  const before = readFileSync(join(dir, "case-history.md"), "utf8");
+  assert.ok(before.includes("**Requester:** Slack member `U2ZLJ2KBP`"), "requester line present pre-run");
+  assert.ok(before.includes("**Q:** make a hotnready site"), "question preserved pre-run");
+  assert.ok(!before.includes("---\n\n"), "entry not closed before the answer lands");
+  closeHistory(dir, "answer");
+  const after = readFileSync(join(dir, "case-history.md"), "utf8");
+  assert.ok(after.includes("answer"), "answer appended");
+  assert.ok(after.endsWith("---\n\n"), "entry closed with separator");
 });
 
-test("appendHistory: no requester means no requester line", () => {
+test("case history: no requester means no requester line", () => {
   const dir = mkdtempSync(join(tmpdir(), "pe-inv-"));
-  appendHistory(dir, "q", "a");
+  openHistory(dir, "q");
+  closeHistory(dir, "a");
   const out = readFileSync(join(dir, "case-history.md"), "utf8");
   assert.ok(!out.includes("**Requester:**"), "no requester line");
 });
