@@ -40,6 +40,9 @@ Resources:
                 Resource:
                   - arn:aws:s3:::polls.pizza
                   - arn:aws:s3:::polls.pizza/*
+                  # staging site (test.yml deploy-staging on PRs)
+                  - arn:aws:s3:::next.polls.pizza
+                  - arn:aws:s3:::next.polls.pizza/*
               - Sid: CloudFrontInvalidation
                 Effect: Allow
                 Action: [cloudfront:CreateInvalidation, cloudfront:GetDistribution, cloudfront:GetInvalidation]
@@ -178,6 +181,13 @@ Resources:
                          sqs:SetQueueAttributes, sqs:TagQueue, sqs:ListQueues]
                 Resource: [!Sub "arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:pizzabase-*"]
               # CloudWatch alarms
+              # ffmpeg layer verification (test.yml deploy-staging job) reads the
+              # published layer zip — scope to the layers/ prefix only; the rest
+              # of raw.polls.pizza holds PII media uploads.
+              - Sid: S3ReadFfmpegLayer
+                Effect: Allow
+                Action: [s3:GetObject]
+                Resource: arn:aws:s3:::raw.polls.pizza/layers/*
               - Sid: CloudWatchAlarms
                 Effect: Allow
                 Action: [cloudwatch:PutMetricAlarm, cloudwatch:DescribeAlarms,
