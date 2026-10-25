@@ -1,6 +1,12 @@
 [Unit]
 Description=pizza-eagle nightly update (git pull --ff-only + rebuild + restart)
-Conflicts=pizza-eagle-update.service before-reboot
+# NO Conflicts= here: conflicts are symmetric in systemd — a conflict with
+# the service this timer triggers STOPS THE TIMER when the service starts.
+# That killed the timer at its first firing (2026-10-24 04:30:11) and the
+# nightly never ran again; systemd schedules timers fine on its own, and
+# shutdown doesn't run timers.target anyway. (Also: "before-reboot" is not
+# a real unit — every daemon-reload logged "Failed to add dependency on
+# before-reboot, ignoring: Invalid argument".)
 
 [Timer]
 OnCalendar=*-*-* 04:30:00
