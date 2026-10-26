@@ -6,4 +6,4 @@ Type=oneshot
 # SLACK_ALERT_WEBHOOK comes from the same Secrets Manager env file.
 # Kept as a template unit so OnFailure=notify-failure@%n.service resolves.
 ExecStart=/opt/pizza-eagle/scripts/notify-failure.sh %i
-EnvironmentFile=/opt/pizza-eagle/.env
+EnvironmentFile=/etc/pizza-eagle/.env

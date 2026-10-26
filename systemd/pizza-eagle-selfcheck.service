@@ -7,5 +7,5 @@ Type=oneshot
 User=pizza-eagle
 Group=pizza-eagle
 WorkingDirectory=/opt/pizza-eagle
-EnvironmentFile=/opt/pizza-eagle/.env
+EnvironmentFile=/etc/pizza-eagle/.env
 ExecStart=/usr/bin/node /opt/pizza-eagle/scripts/self-check.mjs
