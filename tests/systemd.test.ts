@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -96,4 +97,62 @@ test("units: OnFailure= targets an installed notifier template", () => {
       );
     }
   }
+});
+
+/**
+ * 2026-10-27 self-check outage follow-up. #11 repointed the *unit files* to
+ * /etc/pizza-eagle/.env, but scripts/self-check.mjs still re-parsed the old
+ * /opt/pizza-eagle/.env by absolute path — deleted from the box 2026-10-25 —
+ * so the 09:00 checker crashed before probe 1 and only the OnFailure chain
+ * alerted (#dev, 2026-10-27 16:00Z). Two traps to keep closed:
+ *
+ *   1. No tracked file outside tests/ may mention the dead /opt path —
+ *      drift there reintroduced this exact outage.
+ *   2. self-check must never read *any* .env by path. /etc/pizza-eagle/.env
+ *      is root:600 and the unit runs as User=pizza-eagle — the file is
+ *      unreadable at that uid. The systemd-injected process env (already
+ *      asserted for units above via EnvironmentFile=) is the only source.
+ */
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+test("repo: nothing outside tests/ references the dead /opt/pizza-eagle/.env", () => {
+  const DEAD = "/opt/pizza-eagle/.env";
+  // Scan tracked files only: CI checkouts match this exactly, and local
+  // untracked state (case histories, state/) must never fail the guard.
+  const tracked = execFileSync("git", ["ls-files"], { cwd: repoRoot, encoding: "utf8" })
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .filter((f) => !f.startsWith("tests/")); // this file documents the path
+  assert.ok(tracked.length > 0, "git ls-files found nothing — wrong cwd?");
+  const hits = tracked.filter((f) => {
+    try {
+      return readFileSync(join(repoRoot, f), "utf8").includes(DEAD);
+    } catch {
+      return false; // dangling symlink (node_modules) or unreadable
+    }
+  });
+  assert.deepEqual(
+    hits,
+    [],
+    `dead env path ${DEAD} must not appear in tracked files outside tests/ ` +
+      "(removed from the box 2026-10-25)",
+  );
+});
+
+test("scripts: self-check takes env from the systemd-injected process env, never a .env file read", () => {
+  const body = readFileSync(join(repoRoot, "scripts", "self-check.mjs"), "utf8");
+  assert.equal(
+    /readFileSync\([^)]*\.env/.test(body),
+    false,
+    "self-check must not read a .env by path: /etc/pizza-eagle/.env is root:600 " +
+      "and unreadable as User=pizza-eagle; /opt/pizza-eagle/.env is deleted. " +
+      "EnvironmentFile= injects the env into the process before the uid drop — " +
+      "read process.env.",
+  );
+  assert.match(
+    body,
+    /const\s+env\s*=\s*process\.env/,
+    "self-check must source env from process.env (systemd EnvironmentFile)",
+  );
 });
