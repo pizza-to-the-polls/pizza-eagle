@@ -96,6 +96,64 @@ sudo chmod 600 /etc/pizza-eagle/.env   # owner is already root
 sudo systemctl restart pizza-eagle
 ```
 
+## 2026-10-27 red-team remediation — what changed, what still needs YOU
+
+Full review: `~/Projects/pizza-eagle-red-team-2026-10-27.md`. Shipped in
+this repo (deploys via the normal flow — the bot changes need the nightly
+update or `update-agent` dispatch; the IAM changes need a stack deploy):
+
+- **Write gate**: the requester gate is now `request-auth.json` — written by
+  the LISTENER from Slack-authenticated event metadata before every run.
+  The old scheme (newest `**Requester:**` line in `case-history.md`) was
+  forgeable *by the question text itself* — verified, and invisible to the
+  suspicion rules. `gh-token.mjs` and `publish-hotnready.sh` enforce the
+  gate themselves; `--installation` raw minting is removed.
+- **GitHub tokens**: mints are now repo-scoped (`repositories` + minimum
+  `permissions` in the mint body) and allowlisted to the four PTP repos; a
+  "hotnready token" can no longer touch every repo on the installation.
+  Mints are ledgered with the requester id.
+- **Runner**: same-thread investigations serialize (shared workdir/session
+  + a second request used to become "the newest requester" mid-run); thread
+  records persist at case creation; queue bursts past the waiting-room cap
+  get a polite refusal instead of unbounded memory.
+- **IAM (BotRole)**: `LambdaRead` gone (GetFunction returns pizzabase env
+  vars — Stripe/Twilio/Mailgun/JWT), change-set writes gone, Route53 pinned
+  to one A-record UPSERT for `bastion.polls.pizza` (was: any record type,
+  any action, whole zone), EIP association pinned to this stack's allocation.
+- **systemd**: extra hardening on `pizza-eagle.service` (clocks/hostname/
+  kernel/devices locked down).
+- **Detection**: credential-table queries (`api_keys`,
+  `integration_sessions`) now trip the pii-harvest flag.
+
+### Human actions still required (NOT doable from the bot or this repo)
+
+1. **DB revocation (do first)**: run `sql/revoke-credential-tables.sql`
+   with master creds (`pizza-psql`) — revoke `ptp_ro` SELECT on
+   `api_keys` + `integration_sessions`. Until then those tables are
+   readable by every investigation. Then consider rotating whatever API
+   keys/OAuth tokens existed in them (they were readable since 2026-10-23).
+2. **Deploy the IAM changes**: `aws cloudformation deploy` with
+   `build/pizza-eagle.rendered.yaml` (CI renders + changeset-first).
+   ⚠ Review the change set: Route53 gets **condition-scoped** — if the next
+   instance rebuild fails at EIP/DNS registration, the condition keys are
+   the suspect; bootstrap does exactly one UPSERT of one A record for
+   `bastion.polls.pizza`, which is what the conditions allow.
+3. **Verify a real mint** after deploy: from a case workdir with
+   `request-auth.json` (`writeAllowed: true`), `gh-token.mjs --repo
+   pizza-to-the-polls/hotnready` — stderr must say "scoped to …" and a
+   smoke push must still work.
+
+### Known residual — until the sandbox follow-up lands
+
+The worker shares the instance profile/IMDS with bootstrap, so the
+`ptp/prod/pizza-eagle/*` secrets (including `gh-app-key`) are still
+reachable from a tool-compromised investigation run. The instruction-level
+gates (AGENTS.md) and helper enforcement raise the bar but are not a
+credential boundary. **Any evidence of prompt injection = incident:**
+rotate `gh-app-key` (and the Slack tokens) and check `state/usage.jsonl`
+for unexpected `token-mint` entries. Durable fix = per-run IAM identity /
+sandbox (separate tracked work).
+
 ## Alert channels
 
 | What | Where |

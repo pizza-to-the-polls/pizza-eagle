@@ -12,7 +12,6 @@ import { randomUUID, createHash } from "node:crypto";
 import { loadConfig } from "../src/config.js";
 import { runInvestigation } from "../src/investigate.js";
 import { workdirFor } from "../src/store.js";
-
 /** --session labels are for humans; sessions are UUIDs. Stable per label. */
 function sessionFromLabel(label: string): string {
   if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(label)) {
@@ -54,6 +53,10 @@ async function main(): Promise<void> {
     question,
     sessionId,
     workdir,
+    // Local operator = you at the keyboard: full write powers (the Slack
+    // path derives this from authenticated event metadata instead).
+    requester: process.env.USER,
+    writeAllowed: true,
   });
 
   console.log(answer);

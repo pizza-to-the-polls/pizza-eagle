@@ -12,7 +12,7 @@ import { mkdirSync, writeFileSync } from "node:fs";  // mkdir: thread-context wr
 import { execFile } from "node:child_process";
 import { join } from "node:path";
 import { appendUsage, withinDailyCap } from "./usage.js";
-import { evaluateSuspicion } from "./suspicion.js";
+import { evaluateSuspicion, WRITE_GATE } from "./suspicion.js";
 
 // File logs (bot.log) carry no journald timestamps — stamp our own.
 const log = (msg: string) => console.log(`[${new Date().toISOString()}] ${msg}`);
@@ -23,6 +23,7 @@ import { ThreadStore, workdirFor, type ThreadRecord } from "./store.js";
 import Bugsnag from "@bugsnag/js";
 import { editStatus, fetchThreadContext, postFindings, postStatus, react, stripMention } from "./slack.js";
 import { InvestigationError, runInvestigation, activeInvestigations } from "./investigate.js";
+import { RunQueue, QueueFullError } from "./queue.js";
 
 interface MentionEvent {
   channel: string;
@@ -33,24 +34,7 @@ interface MentionEvent {
   bot_id?: string;
 }
 
-/** Minimal FIFO with concurrency cap — jobs are async, acks are instant. */
-class Queue {
-  private running = 0;
-  private readonly waiting: Array<() => void> = [];
-  constructor(private readonly max: number) {}
-  async run<T>(job: () => Promise<T>): Promise<T> {
-    if (this.running >= this.max) {
-      await new Promise<void>((resolve) => this.waiting.push(resolve));
-    }
-    this.running++;
-    try {
-      return await job();
-    } finally {
-      this.running--;
-      this.waiting.shift()?.();
-    }
-  }
-}
+/** Minimal FIFO with concurrency cap — jobs are async, acks are instant. → moved to src/queue.ts (2026-10-27) */
 
 function report(e: unknown): void {
   // no-op until Bugsnag.start() ran (no key configured → local-only errors).
@@ -88,7 +72,9 @@ async function main(): Promise<void> {
   mkdirSync(cfg.stateDir, { recursive: true });
   const store = new ThreadStore(join(cfg.stateDir, "threads.json"));
   const slack = new WebClient(cfg.slackBotToken);
-  const queue = new Queue(cfg.maxConcurrent);
+  // Per-thread serialized, globally capped run queue (src/queue.ts) —
+  // same-thread runs must never overlap (shared case workdir + session).
+  const queue = new RunQueue(cfg.maxConcurrent);
   let shuttingDown = false;
 
   const socket = new SocketModeClient({ appToken: cfg.slackAppToken });
@@ -131,8 +117,9 @@ async function main(): Promise<void> {
     }
 
     const threadTs = event.thread_ts ?? event.ts; // first mention starts a case
+    const existing = store.get(threadTs);
     let record: ThreadRecord =
-      store.get(threadTs) ??
+      existing ??
       ({
         sessionId: randomUUID(),
         channel: event.channel,
@@ -141,6 +128,10 @@ async function main(): Promise<void> {
         lastRunAt: new Date().toISOString(),
         lastAnswer: null,
       } as ThreadRecord);
+    // Persist at CREATION, not first success: two mentions landing while a
+    // run is in flight used to each mint a separate case (fresh sessionId,
+    // same workdir) and race the session + case-history files.
+    if (!existing) store.put(threadTs, record);
 
     // Usage ledger + anti-abuse guardrail: one line per question (audit
     // trail), and a polite in-thread refusal past the daily per-user cap.
@@ -197,7 +188,7 @@ async function main(): Promise<void> {
       `:mag_right: Investigating — findings land in this thread when it finishes (case \`${record.sessionId.slice(0, 8)}\`, question #${record.questionCount + 1}).`,
     );
 
-    void queue.run(async () => {
+    queue.run(threadTs, async () => {
       if (shuttingDown) return;
       // :pizza-eagle-working: on the thread parent while we're working; removed when done
       // (success or failure) — a visible "in progress" marker next to the
@@ -218,6 +209,9 @@ async function main(): Promise<void> {
           sessionId: record.sessionId,
           workdir: record.workdir,
           requester: event.user,
+          // Slack-authenticated gate — lands in request-auth.json in the
+          // case workdir, which the operator prompt + helper scripts trust.
+          writeAllowed: WRITE_GATE.includes(event.user),
         });
         if (statusTs) {
           await editStatus(slack, event.channel, statusTs, ":white_check_mark: Investigation finished.");
@@ -248,6 +242,20 @@ async function main(): Promise<void> {
         // :pizza-eagle-working: off when done — success OR failure
         await react(slack, event.channel, threadTs, "pizza-eagle-working", false);
       }
+    }).catch((e: unknown) => {
+      // The job body never rejects (own try/catch) — a rejection here means
+      // the queue refused the job: waiting room full (burst protection).
+      if (e instanceof QueueFullError) {
+        void postStatus(
+          slack,
+          event.channel,
+          threadTs,
+          ":hourglass_flowing_sand: Too many investigations queued right now — try again in a few minutes.",
+        ).catch(() => { /* cosmetic */ });
+        return;
+      }
+      console.error("[pizza-eagle] queue failure:", e);
+      report(e);
     });
   }
 

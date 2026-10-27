@@ -106,13 +106,15 @@ Resources:
                 Effect: Allow
                 Action: [events:ListRules, events:DescribeRule]
                 Resource: "*"
-              - Sid: LambdaRead
-                Effect: Allow
-                Action: [lambda:ListFunctions, lambda:GetFunction, lambda:ListLayers, lambda:GetLayerVersion, lambda:ListLayerVersions]
-                Resource: "*"
+              # 2026-10-27 red team: LambdaRead (ListFunctions/GetFunction/...)
+              # removed entirely — GetFunction returns function ENVIRONMENT
+              # VARIABLES, and pizzabase's include Stripe/Twilio/Mailgun/JWT
+              # secrets. Investigations have never needed it.
               - Sid: CloudFormationRead
                 Effect: Allow
-                Action: [cloudformation:DescribeStacks, cloudformation:DescribeStackEvents, cloudformation:DescribeChangeSet, cloudformation:CreateChangeSet, cloudformation:DeleteChangeSet, cloudformation:ValidateTemplate]
+                # Change-set writes removed (2026-10-27): investigations read
+                # stacks; the deploy role owns change sets.
+                Action: [cloudformation:DescribeStacks, cloudformation:DescribeStackEvents, cloudformation:DescribeChangeSet, cloudformation:ValidateTemplate]
                 Resource: "*"
               - Sid: S3MediaRead
                 Effect: Allow
@@ -158,11 +160,24 @@ Resources:
               - Sid: EipAssociate # user-data self-associates the EIP
                 Effect: Allow
                 Action: [ec2:AssociateAddress, ec2:DescribeAddresses]
-                Resource: "*"
+                # 2026-10-27 red team: scoped to THIS stack's allocation — was
+                # `*`, which let any code on the box re-associate any EIP.
+                Resource:
+                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:elastic-ip/${OpsElasticIP.AllocationId}
               - Sid: DnsUpsert # user-data upserts the bastion A record
                 Effect: Allow
                 Action: [route53:ChangeResourceRecordSets]
                 Resource: !Sub arn:aws:route53:::hostedzone/${DnsHostedZoneId}
+                # 2026-10-27 red team: this was zone-wide UPSERT/CREATE/DELETE
+                # on any record type — a steered investigation could repoint
+                # polls.pizza or mail MX at will. Condition keys pin it to
+                # exactly what bootstrap does: one A-record UPSERT for
+                # bastion.polls.pizza. Mixed change batches won't match → deny.
+                Condition:
+                  StringEquals:
+                    route53:ChangeResourceRecordSetsActions: [UPSERT]
+                    route53:ChangeResourceRecordSetsRecordTypes: [A]
+                    route53:ChangeResourceRecordSetsNormalizedNames: [bastion.polls.pizza]
               # Nightly tar of state/ (sessions + case history). Grant exists
               # ONLY when BackupBucketName is set — the empty-string default
               # must not widen to a malformed s3:::/* resource.
