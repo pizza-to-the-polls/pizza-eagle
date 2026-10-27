@@ -24,11 +24,13 @@ const check = async (name, fn) => {
   catch (e) { results.push(["❌", name, (e.message || "").slice(0, 120)]); }
 };
 
-const env = {};
-for (const line of (await import("node:fs")).readFileSync("/opt/pizza-eagle/.env", "utf8").split("\n")) {
-  const eq = line.indexOf("=");
-  if (eq > 0 && !line.startsWith("#")) env[line.slice(0, eq)] = line.slice(eq + 1);
-}
+// Env: systemd injects /etc/pizza-eagle/.env (root:600, rendered by bootstrap.sh)
+// via EnvironmentFile= in the unit before dropping to this User=pizza-eagle
+// process — the file itself is unreadable at this uid, so the injected
+// process env is the only correct source. (This block used to re-parse the
+// old in-app .env by absolute path — deleted 2026-10-25 — which crashed
+// the checker before probe 1; see the 2026-10-27 16:00Z #dev alert.)
+const env = process.env;
 
 // 1+2. Slack tokens
 const api = async (method, tok) => {
