@@ -7,34 +7,86 @@
  * never lands in a file.
  *
  * Usage (GH_APP_ID from env; listener injects it from .env):
- *   node gh-token.mjs list                     # show installations
+ *   node gh-token.mjs list                     # show installations (no mint)
  *   node gh-token.mjs --repo owner/name         # token for that repo's installation
- *   node gh-token.mjs --installation <id>       # token for an installation id
  *
  * Prints the raw token to STDOUT (capture: GH_TOKEN="$(node gh-token.mjs …)")
- * and token metadata (expires, permissions) to STDERR. Never display the
- * token itself. Tokens expire in 1h.
+ * and token metadata to STDERR. Never display the token itself. Tokens
+ * expire in 1h.
+ *
+ * Red team hardening (2026-10-27 — findings 4 + 5):
+ *   - --installation <id> minting is REMOVED: it minted an unscoped token
+ *     for ANY installation id with no audit ledger entry.
+ *   - --repo enforces an allowlist (GITHUB_ALLOWED_REPOS, comma-separated,
+ *     default the four PTP repos the bot may touch).
+ *   - --repo mints REPO-SCOPED tokens: the POST body carries `repositories`
+ *     + minimal `permissions`, so a "hotnready publish token" can no longer
+ *     touch every repository on the installation.
+ *   - Minting is a write power: it refuses unless the case workdir carries
+ *     a listener-written request-auth.json with writeAllowed: true. The
+ *     Slack question text cannot forge that file.
+ *   - Every mint lands in the usage ledger bound to the requester id.
  *
  * Injection rule: this mints ONLY on PR/publish paths — investigations run
  * with no GitHub credential in the process.
  */
 import { execFileSync } from "node:child_process";
 import { createSign } from "node:crypto";
-import { appendFileSync } from "node:fs";
-
-// Audit ledger: every mint IS a write-power use (PRs, hotnready publishes).
-// Best-effort — a ledger failure must never block a legitimate mint.
-function logMint(repo) {
-  try {
-    appendFileSync(
-      process.env.USAGE_LOG ?? "/opt/pizza-eagle/state/usage.jsonl",
-      JSON.stringify({ ts: new Date().toISOString(), event: "token-mint", detail: repo }) + "\n",
-    );
-  } catch { /* laptop/dev or missing dir — fine */ }
-}
+import { appendFileSync, readFileSync } from "node:fs";
 
 const API = "https://api.github.com";
 const PEM_SECRET = "ptp/prod/pizza-eagle/gh-app-key";
+
+// Repos the App may act on. Extend via GITHUB_ALLOWED_REPOS only if the
+// write gate (AGENTS.md) has been updated too.
+const DEFAULT_ALLOWED_REPOS = [
+  "pizza-to-the-polls/pizzabase",
+  "pizza-to-the-polls/polls.pizza",
+  "pizza-to-the-polls/feedflag",
+  "pizza-to-the-polls/hotnready",
+];
+const ALLOWED_REPOS = (process.env.GITHUB_ALLOWED_REPOS ?? DEFAULT_ALLOWED_REPOS.join(","))
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+// Minimum permissions for the bot's GitHub work: open/push PR branches and
+// (feedflag only) merge them. Must be a subset of the installation's grants
+// or GitHub rejects the mint with 422 — fail-loud, never fail-wide.
+const MINT_PERMISSIONS = { contents: "write", pull_requests: "write" };
+
+/**
+ * Case-file authorization — written by the LISTENER from the Slack event's
+ * authenticated metadata before each run (src/investigate.ts). The question
+ * text lands in case-history.md, which can imitate any *prose* auth marker,
+ * but cannot create this file. Helper scripts enforce it independently of
+ * the model's good behavior.
+ */
+export function readRequestAuth(cwd = ".") {
+  try {
+    const parsed = JSON.parse(readFileSync(`${cwd}/request-auth.json`, "utf8"));
+    if (parsed && typeof parsed === "object") return parsed;
+  } catch {
+    /* no file / unreadable — treated as no write powers */
+  }
+  return null;
+}
+
+// Audit ledger: every mint IS a write-power use (PRs, hotnready publishes).
+// Best-effort — a ledger failure must never block a legitimate mint.
+function logMint(repo, requester) {
+  try {
+    appendFileSync(
+      process.env.USAGE_LOG ?? "/opt/pizza-eagle/state/usage.jsonl",
+      JSON.stringify({
+        ts: new Date().toISOString(),
+        event: "token-mint",
+        requester: requester ?? null,
+        detail: repo,
+      }) + "\n",
+    );
+  } catch { /* laptop/dev or missing dir — fine */ }
+}
 
 export const b64url = (buf) =>
   Buffer.from(buf).toString("base64")
@@ -60,15 +112,16 @@ function fetchPem() {
   ], { encoding: "utf8" }).trim();
 }
 
-async function gh(path, { method = "GET", token } = {}) {
+async function gh(path, { method = "GET", token, body } = {}) {
   const res = await fetch(`${API}${path}`, {
     method,
     headers: {
       Authorization: `Bearer ${token}`,
       Accept: "application/vnd.github+json",
       "User-Agent": "pizza-eagle gh-token.mjs",
-      ...(method === "POST" ? {} : {}),
+      ...(body ? { "Content-Type": "application/json" } : {}),
     },
+    ...(body ? { body: JSON.stringify(body) } : {}),
   });
   const out = await res.json().catch(() => ({}));
   if (!res.ok) {
@@ -85,10 +138,10 @@ async function main() {
     console.error("GH_APP_ID not set (env or .env — the listener injects it)");
     process.exit(2);
   }
-  const pem = fetchPem();
-  const jwt = appJwt(pem, appId);
 
   if (argv[0] === "list") {
+    const pem = fetchPem();
+    const jwt = appJwt(pem, appId);
     const installs = await gh("/app/installations", { token: jwt });
     for (const i of installs) {
       console.log(JSON.stringify({
@@ -98,22 +151,46 @@ async function main() {
     return;
   }
 
-  let installationId;
-  if (argv[0] === "--repo" && argv[1]) {
-    const inst = await gh(`/repos/${argv[1]}/installation`, { token: jwt });
-    installationId = inst.id;
-    logMint(argv[1]);
-  } else if (argv[0] === "--installation" && argv[1]) {
-    installationId = argv[1];
-  } else {
-    console.error("usage: gh-token.mjs list | --repo owner/name | --installation <id>");
+  if (argv[0] !== "--repo" || !argv[1]) {
+    console.error(
+      "usage: gh-token.mjs list | --repo owner/name\n" +
+      "  (--installation minting was removed 2026-10-27: unscoped, unaudited)");
     process.exit(1);
   }
 
-  const tok = await gh(`/app/installations/${installationId}/access_tokens`, {
+  const repo = argv[1];
+  if (!ALLOWED_REPOS.includes(repo)) {
+    console.error(`FATAL: ${repo} is not on the mint allowlist (${ALLOWED_REPOS.join(", ")})`);
+    process.exit(5);
+  }
+
+  // Write-power gate: request-auth.json is written by the listener from the
+  // Slack event metadata. No file (or writeAllowed !== true) ⇒ no mint.
+  const auth = readRequestAuth();
+  if (!auth || auth.writeAllowed !== true) {
+    console.error(
+      "FATAL: write powers not granted for this case (request-auth.json) — " +
+      "ask an admin (Scott/Nina/Lee) to request it.");
+    process.exit(3);
+  }
+
+  const pem = fetchPem();
+  const jwt = appJwt(pem, appId);
+
+  const inst = await gh(`/repos/${repo}/installation`, { token: jwt });
+  // Repo-scoped mint: without this body GitHub grants the FULL installation
+  // (every repo + every permission) — that was the pre-2026-10-27 behavior.
+  // `repositories` is installation-relative (name without owner).
+  const repoName = repo.split("/")[1];
+  const tok = await gh(`/app/installations/${inst.id}/access_tokens`, {
     method: "POST", token: jwt,
+    body: { repositories: [repoName], permissions: MINT_PERMISSIONS },
   });
-  console.error(`# token expires ${tok.expires_at}; permissions: ${JSON.stringify(tok.permissions)}`);
+
+  logMint(repo, auth.requester ?? null);
+  console.error(
+    `# token expires ${tok.expires_at}; scoped to ${repo} ` +
+    `(permissions ${JSON.stringify(MINT_PERMISSIONS)}; requester ${auth.requester ?? "unknown"})`);
   process.stdout.write(tok.token);
 }
 

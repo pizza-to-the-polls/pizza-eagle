@@ -21,6 +21,12 @@ const PII_HARVEST = [
   /export ((the |all )*)(donations|reports|donors|contacts?|subscribers?)\b/i,
   /dump ((the |all )*)(donations|reports|donors|banned)/i,
   /contact (info|details|information) (for|of) ((every|all|the )*)(donor|voter|reporter)/i,
+  // Credential storage (red team 2026-10-27): api_keys holds usable API
+  // keys and integration_sessions holds social OAuth tokens — ptp_ro could
+  // read both until the DB revocation landed. Any read attempt gets flagged
+  // (and AGENTS.md forbids the query outright).
+  /\b(select|read|dump|export|list|show|grab|pull|query)\b[^.\n]{0,50}\b(api_keys|integration_sessions)\b/i,
+  /\b(api_keys|integration_sessions)\b\s+(table|keys?|credentials?)/i,
 ];
 
 const WRITE_ATTEMPT = [

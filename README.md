@@ -60,7 +60,8 @@ PRs can't merge red.
   → post "🔎 Investigating…" to thread          (instant ack)
   → queue job → pi --print --session-id <thread-session> "<question>"
       cwd = state/work/<thread>/   (AGENTS.md + case-history.md + thread-context.md)
-      requester id rides in the case file — write-powers gated to vetted members
+      listener writes request-auth.json from Slack metadata — write-powers gate
+      (same-thread runs serialize; global concurrency cap; queue-burst refusal)
   → findings chunked into the thread; status edited to ✅/❌
   → thread map persisted (follow-ups resume the same pi session)
 ```
@@ -236,19 +237,41 @@ including Slack messages: delete after one year):
 - **Slack alerts**: unit failures post to `SLACK_ALERT_CHANNEL` via the
   bot token (webhook path still supported).
 
-## Security boundary (read-only by construction)
+## Security boundary
 
-- The `pizza-eagle` OS user's only AWS identity is the instance role: logs
-  read, S3 media read, `PizzaBaseReadOnly` Data API (`ptp_ro` = SELECT on
-  all 14 tables — verified), Bugsnag readonly, gh, GA4 readonly (aggregate
-  analytics, no PII — SA at `~/.config/ptp/ga-readonly.json`).
-- No DB write path exists for the bot. The only mutating surface is P4's
-  scoped GitHub App: draft PRs on `polls.pizza`/`pizzabase` (human merge
-  mandatory — branch protection + author-can't-approve) and free publish to
-  the `hotnready` Pages sandbox. Credentials ride the per-invocation
-  injection rule. See SLACK_BOT_PLAN.md §10 P4.
+Red-team review 2026-10-27 (`~/Projects/pizza-eagle-red-team-2026-10-27.md`) —
+what the boundary actually is, and what was fixed:
+
+- **DB (`ptp_ro`, SELECT-only)**: no SQL write path exists for the bot. **But
+  SELECT ≠ harmless**: `api_keys`/`integration_sessions` hold *usable*
+  credentials (API keys accepted by pizzabase write endpoints; social OAuth
+  tokens). AGENTS.md forbids querying them outright, the suspicion detector
+  flags the phrasing, and `sql/revoke-credential-tables.sql` is the human-run
+  revocation — until it lands, treat those tables as exposed.
+- **AWS (instance role)**: logs read (pizzabase lambda + own), S3 media read,
+  RDS Data API, Bugsnag/GA4 readonly. 2026-10-27: `LambdaRead` **removed**
+  (GetFunction returns env vars = secrets), change-set writes removed, Route53
+  UPSERT pinned to `bastion.polls.pizza` A-records (was zone-wide any-type),
+  EIP association pinned to this stack's allocation.
+- **Write powers (P4)**: gated by `request-auth.json` — a machine-readable file
+  the LISTENER writes from Slack-authenticated event metadata before every
+  run (admins: Scott/Nina/Lee). The helper scripts enforce it too:
+  `gh-token.mjs` mints **repo-scoped** tokens (allowlist + `repositories` +
+  minimum `permissions` in the mint body; raw `--installation` minting
+  removed) and `publish-hotnready.sh` refuses without the gate. Every mint
+  + publish lands in the usage ledger bound to the requester id.
+- **Slack input**: question/thread text is untrusted — it can imitate prose
+  auth markers in `case-history.md` (verified) but cannot create
+  `request-auth.json`. Same-thread runs serialize (`src/queue.ts`), burst
+  beyond the waiting-room cap is refused in-thread.
 - Never post raw contact info or raw bucket paths to Slack — conventions
   live in `agent/AGENTS.md`.
+
+**Known residual** (tracked in RUNBOOK): the worker shares the instance
+profile/IMDS with bootstrap, so `ptp/prod/pizza-eagle/*` secrets (incl.
+`gh-app-key`) remain reachable from a tool-compromised run — the durable fix
+is a per-run sandbox/IAM identity, not done in this repo. Any hint of prompt
+injection = incident: rotate the App key.
 
 ## Operations status
 
@@ -258,6 +281,9 @@ admin-ssh-key). Day-to-day tasks are in the Pizza to the Polls Todoist
 project (🤖Pi label); the design history and roadmap live in
 `SLACK_BOT_PLAN.md` (§10, P0–P5).
 
-Known follow-ups: CW log shipping (stream never materializes — todo),
-Nina/Lee Slack member IDs for the write-gate, prod channel pick,
-old-bastion decommission after soak, OIDC deploy role for CI.
+Known follow-ups: CW log shipping (stream never materializes — todo), prod
+channel pick, old-bastion decommission after soak. Security follow-ups from
+the 2026-10-27 red team (see RUNBOOK): run
+`sql/revoke-credential-tables.sql` against the DB (master creds), deploy
+the IAM changes (change-set first), and build the per-run worker sandbox so
+the investigation process never shares the instance profile.

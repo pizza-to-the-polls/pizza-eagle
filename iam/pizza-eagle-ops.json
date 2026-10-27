@@ -56,18 +56,6 @@
       "Resource": "*"
     },
     {
-      "Sid": "LambdaRead",
-      "Effect": "Allow",
-      "Action": [
-        "lambda:ListFunctions",
-        "lambda:GetFunction",
-        "lambda:ListLayers",
-        "lambda:GetLayerVersion",
-        "lambda:ListLayerVersions"
-      ],
-      "Resource": "*"
-    },
-    {
       "Sid": "CloudFormationRead",
       "Effect": "Allow",
       "Action": [

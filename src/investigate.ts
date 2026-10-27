@@ -14,7 +14,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { appendFileSync, copyFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Config } from "./config.js";
 
@@ -109,9 +109,17 @@ export function childEnv(
 
 export async function runInvestigation(
   cfg: Config,
-  opts: { question: string; sessionId: string; workdir: string; requester?: string },
+  opts: { question: string; sessionId: string; workdir: string; requester?: string; writeAllowed?: boolean },
 ): Promise<InvestigationResult> {
   mkdirSync(opts.workdir, { recursive: true });
+
+  // Listener-owned per-run authorization record (see writeRequestAuth):
+  // written BEFORE the run so the operator prompt and the helper scripts
+  // gate on Slack-authenticated identity, never on question text.
+  writeRequestAuth(opts.workdir, {
+    requester: opts.requester,
+    writeAllowed: opts.writeAllowed,
+  });
 
   // Operator context rides along into every run (idempotent).
   try {
@@ -185,6 +193,41 @@ export async function runInvestigation(
 
   tryHistory(() => closeHistory(opts.workdir, answer));
   return { answer, durationMs };
+}
+
+/**
+ * Machine-readable per-run authorization, written by the LISTENER from
+ * the Slack event's authenticated user metadata before each pi run.
+ *
+ * This is the ONLY requester signal the operator prompt and the helper
+ * scripts (gh-token.mjs, publish-hotnready.sh) trust. The old scheme —
+ * a `**Requester:**` line in the newest case-history.md entry — was
+ * forgeable, because openHistory() appends the raw question into that
+ * same file and a question can carry its own `---` + header + requester
+ * line (red team 2026-10-27, finding 4: verified, and undetected by the
+ * suspicion rules). case-history.md Requester lines stay as transcript;
+ * they are no longer auth.
+ *
+ * A tool-level compromise could still rewrite this file (same OS user) —
+ * the durable fix for that is the per-run sandbox follow-up, not this file.
+ */
+export function writeRequestAuth(
+  workdir: string,
+  auth: { requester?: string; writeAllowed?: boolean },
+): void {
+  mkdirSync(workdir, { recursive: true });
+  writeFileSync(
+    join(workdir, "request-auth.json"),
+    JSON.stringify(
+      {
+        requester: auth.requester ?? null,
+        writeAllowed: Boolean(auth.writeAllowed),
+        ts: new Date().toISOString(),
+      },
+      null,
+      2,
+    ) + "\n",
+  );
 }
 
 /**

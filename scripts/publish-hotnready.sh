@@ -17,6 +17,16 @@ SRC="$1"; SLUG="$2"; MSG="${3:-"pizza-eagle: publish $SLUG"}"
 case "$SLUG" in ""|*[!a-z0-9-]*) echo "FATAL: slug must be lowercase a-z 0-9 -" >&2; exit 1;; esac
 [ -f "$SRC/index.html" ] || echo "note: no index.html in $SRC — the URL won't render a page" >&2
 
+# Write-power gate (red team 2026-10-27): request-auth.json is written by the
+# listener from Slack event metadata before each run — question text can
+# imitate prose markers but cannot create this file. No write powers ⇒ no
+# publish. Run from the case workdir (same convention as gh-token.mjs).
+if ! jq -e '.writeAllowed == true' ./request-auth.json >/dev/null 2>&1; then
+  echo "FATAL: write powers not granted for this case (request-auth.json) — ask an admin" >&2
+  exit 3
+fi
+REQUESTER=$(jq -r '.requester // "unknown"' ./request-auth.json)
+
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 GH_TOKEN=$(node "$REPO_ROOT/scripts/gh-token.mjs" --repo pizza-to-the-polls/hotnready 2>/dev/null) \
   || { echo "FATAL: token mint failed (is GH_APP_ID set?)" >&2; exit 1; }
@@ -35,7 +45,7 @@ git -C "$WORK/hr" "${GITID[@]}" commit -q -m "$MSG"
 git -C "$WORK/hr" -c http.extraheader="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')" \
   push -q origin HEAD:refs/heads/main
 
-echo "{"ts": "$(date -u +%Y-%m-%dT%H:%M:%SZ)", "event": "publish", "detail": "$SLUG"}" \
+echo "{"ts": "$(date -u +%Y-%m-%dT%H:%M:%SZ)", "event": "publish", "requester": "$REQUESTER", "detail": "$SLUG"}" \
   >> "${USAGE_LOG:-/opt/pizza-eagle/state/usage.jsonl}"
 echo "published: https://pizza-to-the-polls.github.io/hotnready/$SLUG/"
 echo "(GitHub Pages rebuilds in ~1-2 minutes)"
