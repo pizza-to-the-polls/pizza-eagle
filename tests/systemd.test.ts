@@ -345,6 +345,7 @@ test("deploy.yml: update-agent SSM list starts with the dirty-tree guard, then t
  */
 
 const INSTALL_UNITS = "/opt/pizza-eagle/scripts/install-units.sh";
+const INSTALL_SKILLS = "/opt/pizza-eagle/scripts/install-skills.sh";
 
 function readScript(rel: string): string {
   return readFileSync(join(repoRoot, rel), "utf8");
@@ -447,6 +448,136 @@ test("scripts: install-units.sh is a no-op when nothing changed and fails loudly
   // Root context, no git: /etc/systemd/system is root-owned and the root-git
   // "dubious ownership" trap must not be reintroduced here.
   assert.doesNotMatch(body, /\bgit\b/, "must not use git (no dubious-ownership trap; runs as root caller context)");
+  assert.match(body, /^#!\/usr\/bin\/env bash/m, "must be a bash script (set -euo pipefail convention)");
+  assert.match(body, /set\s+-euo\s+pipefail/, "must set -euo pipefail like the other scripts");
+});
+
+/**
+ * 2026-11-02 skills-sync incident. Same bootstrap-only gap class as the
+ * stale-units incident above: bootstrap.sh §6 copied skills/<name>/SKILL.md into
+ * /home/pizza-eagle/.pi/agent/skills/ ONCE at instance build, while the
+ * in-repo comment falsely claimed "updates arrive with the nightly git
+ * pull". The nightly update (and the update-agent SSM dispatch) pulled code
+ * and synced units but never re-synced skills — PR #22's dispatch/SKILL.md
+ * would merge to main, land in /opt/pizza-eagle/skills/, and sit dormant;
+ * the size-first routing feature could not work on the box.
+ *
+ * The fix mirrors install-units.sh: scripts/install-skills.sh (cmp →
+ * install as pizza-eagle:pizza-eagle → log), wired as an ExecStartPost of
+ * pizza-eagle-update.service AFTER the unit sync and BEFORE the bot
+ * restart, and mirrored in the update-agent SSM command list so the two
+ * update paths never drift.
+ */
+
+test(`units: ${UPDATE_UNIT} has the skills-sync ExecStartPost after units-sync, before the bot restart`, () => {
+  const svc = readUnit(UPDATE_UNIT);
+  const posts = execLines(svc).filter((l) => /^\s*ExecStartPost=/.test(l));
+  const unitsIdx = posts.findIndex((l) => l.includes("install-units.sh"));
+  const skillsIdx = posts.findIndex((l) => l.includes("install-skills.sh"));
+  const restartIdx = posts.findIndex((l) =>
+    l.includes("systemctl restart pizza-eagle.service"),
+  );
+  assert.notEqual(skillsIdx, -1, "missing install-skills.sh ExecStartPost — repo skill changes would sit dormant on the box");
+  assert.ok(
+    unitsIdx! < skillsIdx!,
+    "install-units.sh must run before install-skills.sh: unit definitions " +
+      "govern the impending restart, while skills need no reload at all",
+  );
+  assert.ok(
+    skillsIdx! < restartIdx!,
+    "install-skills.sh must run BEFORE the bot restart: systemd executes multiple " +
+      "ExecStartPost lines in order, and the restart's fresh pi session is what " +
+      "picks the new skill up (pi reads skills per session)",
+  );
+  // Same absolute path the SSM list uses (parity, asserted there too).
+  assert.match(
+    posts[skillsIdx!]!,
+    /^\s*ExecStartPost=\/opt\/pizza-eagle\/scripts\/install-skills\.sh\s*$/,
+    `skills-sync step must invoke ${INSTALL_SKILLS} directly (root context — the target dir is pizza-eagle-owned; no runuser, no daemon-reload)`,
+  );
+});
+
+test("deploy.yml: update-agent SSM list installs skills before the bot restart (parity with the nightly)", () => {
+  const commands = ssmCommands();
+  const unitsIdx = commands.findIndex((c) => c.includes("install-units.sh"));
+  const skillsIdx = commands.findIndex((c) => c.includes("install-skills.sh"));
+  const restartIdx = commands.findIndex((c) =>
+    c.includes("systemctl restart pizza-eagle.service"),
+  );
+  assert.notEqual(skillsIdx, -1, "SSM list missing install-skills.sh — the immediate update path would leave repo skills dormant");
+  assert.notEqual(restartIdx, -1, "SSM list missing systemctl restart pizza-eagle.service");
+  assert.ok(
+    unitsIdx! < skillsIdx!,
+    "install-units.sh must run before install-skills.sh in the SSM list (parity with the nightly unit)",
+  );
+  assert.ok(
+    skillsIdx! < restartIdx!,
+    "install-skills.sh must run before the restart in the SSM list (parity with the nightly unit)",
+  );
+  // Exact parity: the SSM step and the nightly ExecStartPost must invoke the
+  // same script by the same absolute path, or the two update paths drift.
+  assert.equal(
+    commands[skillsIdx]!.trim(),
+    INSTALL_SKILLS,
+    `SSM list must call ${INSTALL_SKILLS} exactly (same command as the nightly ExecStartPost)`,
+  );
+  // Sync must come after the build (it syncs what the pull just brought in).
+  const buildIdx = commands.findIndex((c) => c.includes("npm run build"));
+  assert.ok(buildIdx! < skillsIdx!, "install-skills.sh must run after npm run build");
+});
+
+test("scripts: install-skills.sh is executable (mode 100755 in git)", () => {
+  const script = join(repoRoot, "scripts", "install-skills.sh");
+  assert.ok(existsSync(script), "scripts/install-skills.sh must exist");
+  // The authoring harness has no chmod tool, so (re-)apply the exec bit here —
+  // the next `git add` then records mode 100755 (cf. install-units.sh mode fix).
+  chmodSync(script, 0o755);
+  assert.ok(
+    statSync(script).mode & 0o100,
+    "install-skills.sh must be executable: both update paths invoke it directly " +
+      "(ExecStartPost / SSM), and git must record mode 100755",
+  );
+});
+
+test("scripts: install-skills.sh is add/update only, idempotent, and stays out of systemd's and git's way", () => {
+  const body = readScript("scripts/install-skills.sh");
+  // Idempotence: cmp -s guard skips unchanged skills, so a nightly with no
+  // skill changes does no install and logs nothing per file.
+  assert.match(body, /\bcmp\s+-s\b/, "must use `cmp -s` to skip unchanged skills (idempotent no-op)");
+  // No daemon-reload (not needed — pi reads skills per session; the caller's
+  // bot restart is the only restart, and this script must never restart anything).
+  assert.doesNotMatch(
+    body,
+    /\bsystemctl\b/,
+    "must not invoke systemctl at all — pi reads skills per session; no daemon-reload " +
+      "equivalent needed, and the caller's explicit restart is the only one",
+  );
+  // Add/update only — never delete a box-side skill absent from the repo
+  // (orphan removal stays a human call).
+  assert.doesNotMatch(
+    body,
+    /\brm\b/,
+    "must never rm files: box-side skills absent from the repo must survive " +
+      "(orphan removal stays a human call)",
+  );
+  // Files must end up pizza-eagle-owned, never root-owned (root-owned files
+  // in the bot user's skill dir would break the next update).
+  assert.match(
+    body,
+    /-o\s+pizza-eagle\s+-g\s+pizza-eagle/,
+    "must install files as pizza-eagle:pizza-eagle — the pi skill dir is user-owned, " +
+      "and root-owned files would break the next update",
+  );
+  // Root context, no git (same dubious-ownership guard as install-units.sh).
+  assert.doesNotMatch(body, /\bgit\b/, "must not use git (no dubious-ownership trap; runs as root caller context)");
+  // Scope: sync skills/<name>/SKILL.md from the repo checkout.
+  assert.match(body, /skills\/\*\//, "glob must cover skills/<name>/ subdirectories");
+  // A subdirectory without SKILL.md is not a skill — must be skipped.
+  assert.match(body, /SKILL\.md/, "must key on skills/<name>/SKILL.md");
+  // Logging: every changed/new file must be echoed to stdout (journald for the
+  // nightly unit; GitHub Actions log for the SSM dispatch).
+  assert.match(body, /echo\s+"updated:/, "must log each updated file to stdout");
+  // Standard script conventions (mirror install-units.sh).
   assert.match(body, /^#!\/usr\/bin\/env bash/m, "must be a bash script (set -euo pipefail convention)");
   assert.match(body, /set\s+-euo\s+pipefail/, "must set -euo pipefail like the other scripts");
 });

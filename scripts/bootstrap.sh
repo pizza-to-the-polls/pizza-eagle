@@ -92,11 +92,14 @@ fi
 install -d -o pizza-eagle -g pizza-eagle -m 755 /opt/pizza-eagle/state
 install -o pizza-eagle -g pizza-eagle -m 644 "$PTP_BOT_HOME/agent/AGENTS.md" \
   /opt/pizza-eagle/state/AGENTS.template.md
-# Skills (triage, agent-status, ...) — copied once by provisioning, then
-# ride the repo via the update timer:
-install -d -o pizza-eagle -g pizza-eagle /home/pizza-eagle/.pi/agent/skills
-# Skills ride the repo: each skills/<name>/SKILL.md installs into the bot
-# user's pi skill directory (updates arrive with the nightly git pull).
+# Skills (triage, agent-status, ...) — provisioned once here, then kept in
+# sync by the update timer:
+install -d -o pizza-eagle -g pizza-eagle -m 755 /home/pizza-eagle/.pi/agent/skills
+# The nightly pull only refreshes /opt/pizza-eagle/skills/ — it does NOT
+# reach the pi skill dir. Each skills/<name>/SKILL.md is synced into the
+# bot user's pi skill directory by scripts/install-skills.sh, wired as an
+# ExecStartPost of pizza-eagle-update.service (after install-units.sh,
+# before the restart) and mirrored in the update-agent SSM dispatch.
 if [ -d "$PTP_BOT_HOME/skills" ]; then
   for d in "$PTP_BOT_HOME/skills"/*/; do
     [ -f "${d}SKILL.md" ] || continue

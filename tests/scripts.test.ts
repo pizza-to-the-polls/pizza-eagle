@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { createSign, createVerify, generateKeyPairSync } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -201,4 +201,83 @@ test("gh-token readRequestAuth: absent/unreadable file ⇒ null", () => {
   assert.equal(readRequestAuth(dir), null, "unparseable");
   writeFileSync(join(dir, "request-auth.json"), JSON.stringify({ writeAllowed: true }));
   assert.deepEqual(readRequestAuth(dir), { writeAllowed: true });
+});
+
+/**
+ * Behavioral test for scripts/install-skills.sh (2026-11-02 skills-sync issue).
+ * The script reads REPO_DIR and SKILL_TARGET from the environment
+ * (PE_REPO_DIR / PE_SKILL_TARGET), so we can point it at a throwaway repo
+ * tree without root or the real /home/pizza-eagle path. Because the harness
+ * is not root, the script's ownership guard drops the -o/-g install flags
+ * (it only uses them when running as root on the box).
+ *
+ * Covers the four acceptance-criteria behaviors:
+ *   1. First run with a repo skill absent from the target → installed.
+ *   2. Second run with no changes → no-op (no `updated:` lines, exit 0).
+ *   3. Repo skill changed → re-installed, `updated:` logged.
+ *   4. Box-side skill absent from the repo → untouched (never deleted).
+ *   5. Repo subdirectory without SKILL.md → silently skipped.
+ */
+test("install-skills.sh: installs new skills, no-ops on identical, re-installs on change, never deletes orphans", () => {
+  const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const script = join(repoRoot, "scripts", "install-skills.sh");
+
+  const tmp = mkdtempSync(join(tmpdir(), "pe-skills-"));
+  const repoDir = join(tmp, "repo");
+  const targetDir = join(tmp, "target");
+  mkdirSync(join(repoDir, "skills", "ga"), { recursive: true });
+  mkdirSync(targetDir, { recursive: true });
+
+  // A real repo skill in the fake repo tree.
+  writeFileSync(join(repoDir, "skills", "ga", "SKILL.md"), "# ga skill v1");
+  // A box-side orphan that is NOT in the repo — must survive every run.
+  writeFileSync(join(targetDir, "orphan-skill"), "should survive");
+
+  const runScript = () =>
+    spawnSync("bash", [script], {
+      cwd: repoDir,
+      env: { ...process.env, PE_REPO_DIR: repoDir, PE_SKILL_TARGET: targetDir },
+      encoding: "utf8",
+    });
+
+  // Run 1: ga is absent from the target → installed, and logged.
+  const r1 = runScript();
+  assert.equal(r1.status, 0, `script failed: ${r1.stderr}`);
+  assert.match(r1.stdout, /updated: ga\/SKILL\.md/, "first run must log the new skill");
+  assert.equal(
+    readFileSync(join(targetDir, "ga", "SKILL.md"), "utf8"),
+    "# ga skill v1",
+    "installed file must match the repo source",
+  );
+
+  // Run 2: nothing changed → no-op (no `updated:` line, but clean exit).
+  const r2 = runScript();
+  assert.equal(r2.status, 0, `script failed: ${r2.stderr}`);
+  assert.doesNotMatch(r2.stdout, /updated:/, "unchanged skill must be skipped");
+  assert.match(r2.stdout, /all skills current — no changes/, "no-op run must report no changes");
+
+  // Run 3: the repo skill changed → re-installed and logged again.
+  writeFileSync(join(repoDir, "skills", "ga", "SKILL.md"), "# ga skill v2");
+  const r3 = runScript();
+  assert.equal(r3.status, 0, `script failed: ${r3.stderr}`);
+  assert.match(r3.stdout, /updated: ga\/SKILL\.md/, "changed skill must be re-installed and logged");
+  assert.equal(
+    readFileSync(join(targetDir, "ga", "SKILL.md"), "utf8"),
+    "# ga skill v2",
+    "changed skill must be updated in the target",
+  );
+
+  // Run 4: the box-side orphan survived every run (add/update only, no deletes).
+  assert.equal(
+    readFileSync(join(targetDir, "orphan-skill"), "utf8"),
+    "should survive",
+    "box-side skill absent from the repo must never be touched",
+  );
+
+  // Run 5: a repo subdirectory without SKILL.md is not a skill → skipped.
+  mkdirSync(join(repoDir, "skills", "empty-dir"));
+  const r5 = runScript();
+  assert.equal(r5.status, 0, `script failed: ${r5.stderr}`);
+  assert.doesNotMatch(r5.stdout, /updated:/, "subdir without SKILL.md must not be installed");
+  assert.ok(!existsSync(join(targetDir, "empty-dir")), "subdir without SKILL.md must not appear in the target");
 });
