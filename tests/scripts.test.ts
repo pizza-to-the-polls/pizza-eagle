@@ -149,7 +149,7 @@ test("gh-token: mint is repo-scoped, permission-scoped, and audited", () => {
   const body = JSON.parse(mint.body ?? "{}");
   // The pre-fix behavior was an empty body = FULL installation access.
   assert.deepEqual(body.repositories, ["hotnready"], "token scoped to one repo");
-  assert.deepEqual(body.permissions, { contents: "write", pull_requests: "write" }, "minimum permissions");
+  assert.deepEqual(body.permissions, { contents: "write", pull_requests: "write", issues: "write" }, "minimum permissions — issues:write included so dispatch issues can be labeled agent:ready");
   assert.match(r.ledger, /"event":"token-mint"/);
   assert.match(r.ledger, /"requester":"U2ZLJ2KBP"/);
   assert.match(r.ledger, /hotnready/);

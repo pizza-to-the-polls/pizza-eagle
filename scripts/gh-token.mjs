@@ -50,10 +50,14 @@ const ALLOWED_REPOS = (process.env.GITHUB_ALLOWED_REPOS ?? DEFAULT_ALLOWED_REPOS
   .map((s) => s.trim())
   .filter(Boolean);
 
-// Minimum permissions for the bot's GitHub work: open/push PR branches and
-// (feedflag only) merge them. Must be a subset of the installation's grants
-// or GitHub rejects the mint with 422 — fail-loud, never fail-wide.
-const MINT_PERMISSIONS = { contents: "write", pull_requests: "write" };
+// Minimum permissions for the bot's GitHub work: open/push PR branches,
+// (feedflag only) merge them, and dispatch issues with the `agent:ready`
+// label (dd-agent pickup). Labels and issue comments require `issues: write`
+// — issue *creation* succeeds without it, label add 403s (observed
+// 2026-10-28: pizzabase#349 filed fine, labels rejected). Must be a subset
+// of the installation's grants or GitHub rejects the mint with 422 —
+// fail-loud, never fail-wide.
+const MINT_PERMISSIONS = { contents: "write", pull_requests: "write", issues: "write" };
 
 /**
  * Case-file authorization — written by the LISTENER from the Slack event's

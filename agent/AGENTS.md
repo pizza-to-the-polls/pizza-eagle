@@ -103,8 +103,9 @@ thread humans read.
   GH_TOKEN=$(node /opt/pizza-eagle/scripts/gh-token.mjs --repo pizza-to-the-polls/<repo>)
   export GH_TOKEN
   ```
-  The minted token is scoped to that ONE repository with contents+pull_requests
-  write only (enforced by the helper; `--installation` raw minting is gone).
+  The minted token is scoped to that ONE repository with
+  contents+pull_requests+issues write only (enforced by the helper;
+  `--installation` raw minting is gone).
   If the mint refuses with "write powers not granted", the requester isn't
   an admin — say so in the thread and stop.
   Then clone the target repo, make the change on a branch, and open a
