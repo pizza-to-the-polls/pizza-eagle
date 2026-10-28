@@ -1,0 +1,39 @@
+[Unit]
+Description=pizza-eagle investigation egress filter (UID-owner iptables, issue #5)
+Documentation=file:/opt/pizza-eagle/RUNBOOK.md
+# Defense in depth ONLY — the core isolation boundary (PID namespace, UID
+# boundary, read-only rootfs, workdir-only mounts) works without this unit.
+# The investigation container shares the host network namespace (IMDS +
+# AWS API reachability), so its packets carry uid pizza-eagle-inv and an
+# owner-match rule can fence them off.
+# Opt-out for a box where the rules don't fit: touch /etc/pizza-eagle/NO_INVESTIGATION_NET
+ConditionPathExists=!/etc/pizza-eagle/NO_INVESTIGATION_NET
+After=network-pre.target
+Before=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Ordering rule: each -I OUTPUT 1 pushes the previous rule down, so the
+# inserts are listed in REVERSE of final order → final chain:
+#   1. allow DNS (UDP 53)         2. allow IMDS (link-local only)
+#   3. allow HTTPS egress         4. DROP everything else from this uid
+# Restricting :443 to specific AWS API CIDRs is impractical (the APIs sit
+# behind dynamically-addressed CloudFront/LB endpoints); the value here is
+# blocking raw-IP exfiltration and non-HTTP protocols, not domain filtering
+# — that needs the local-HTTP-proxy follow-up (RUNBOOK).
+ExecStart=/usr/sbin/iptables -I OUTPUT 1 -m owner --uid-owner pizza-eagle-inv -p tcp --dport 443 -j ACCEPT
+ExecStart=/usr/sbin/iptables -I OUTPUT 1 -m owner --uid-owner pizza-eagle-inv -d 169.254.169.254/32 -j ACCEPT
+ExecStart=/usr/sbin/iptables -I OUTPUT 1 -m owner --uid-owner pizza-eagle-inv -p udp --dport 53 -j ACCEPT
+ExecStart=/usr/sbin/iptables -A OUTPUT -m owner --uid-owner pizza-eagle-inv -j DROP
+# Remove exactly what ExecStart added (one -D per inserted rule).
+ExecStop=/usr/sbin/iptables -D OUTPUT -m owner --uid-owner pizza-eagle-inv -p udp --dport 53 -j ACCEPT
+ExecStop=/usr/sbin/iptables -D OUTPUT -m owner --uid-owner pizza-eagle-inv -d 169.254.169.254/32 -j ACCEPT
+ExecStop=/usr/sbin/iptables -D OUTPUT -m owner --uid-owner pizza-eagle-inv -p tcp --dport 443 -j ACCEPT
+ExecStop=/usr/sbin/iptables -D OUTPUT -m owner --uid-owner pizza-eagle-inv -j DROP
+
+[Install]
+WantedBy=multi-user.target
+# NOT enabled by bootstrap (defense in depth, enable deliberately once the
+# rules are reviewed for the box):
+#   systemctl enable --now pizza-eagle-investigation-net.service

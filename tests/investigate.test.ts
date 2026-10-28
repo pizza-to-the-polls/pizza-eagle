@@ -1,9 +1,27 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, readdirSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { childEnv, closeHistory, openHistory, piArgs, writeRequestAuth } from "../src/investigate.js";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  InvestigationError,
+  MAX_QUESTION_CHARS,
+  closeHistory,
+  openHistory,
+  runInvestigation,
+  validateRunInputs,
+  wrapperEnv,
+  writeRequestAuth,
+} from "../src/investigate.js";
 import { stripMention } from "../src/slack.js";
 import type { Config } from "../src/config.js";
 
@@ -13,11 +31,53 @@ const cfg = {
   allowedChannels: new Set<string>(),
   allowedUsers: new Set<string>(),
   piBin: "/usr/local/bin/pi",
+  invWrapper: "/opt/pizza-eagle/scripts/run-investigation-container.sh",
+  invImage: "pizza-eagle-investigation",
+  invUser: "pizza-eagle-inv",
+  piAgentDir: "/home/pizza-eagle/.pi/agent",
   stateDir: "/var/lib/pizza-eagle",
   agentDir: "/opt/pizza-eagle/agent",
   timeoutMs: 20 * 60_000,
   maxConcurrent: 2,
 } satisfies Config;
+
+const SESSION_ID = "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0";
+
+// ── Real-wrapper contract tests ─────────────────────────────────────────────
+// pi's argv construction moved from investigate.ts into the isolation wrapper
+// (scripts/run-investigation-container.sh, issue #5). These tests run the REAL
+// wrapper in its hermetic mode-3 (no podman, no privilege drop) with a fake pi,
+// so the argv contract is verified against the script that actually runs on
+// the box — not a copy of it.
+
+const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+const WRAPPER = join(repoRoot, "scripts", "run-investigation-container.sh");
+
+// Forces mode 3: INV_USER never resolves in getent, so can_drop() fails and
+// the wrapper execs $PI_BIN directly — no podman, no sudo, no root needed.
+const NONEXISTENT_INV_USER = "pe-inv-test-nonexistent-user";
+
+/** A fake pi that dumps its argv one-per-line into the cwd. */
+function writeMockPi(dir: string): string {
+  const p = join(dir, "mock-pi.sh");
+  writeFileSync(p, "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > \"$PWD/pi-argv.txt\"\n");
+  chmodSync(p, 0o755);
+  return p;
+}
+
+function runWrapper(args: string[], env: Record<string, string> = {}) {
+  return spawnSync("bash", [WRAPPER, ...args], {
+    cwd: repoRoot,
+    env: { ...process.env, INV_USER: NONEXISTENT_INV_USER, ...env },
+    encoding: "utf8",
+  });
+}
+
+function argvOf(dir: string): string[] {
+  return readFileSync(join(dir, "pi-argv.txt"), "utf8")
+    .split("\n")
+    .filter((s) => s !== "");
+}
 
 test("request-auth: listener-owned file, forgeable question text cannot create it", () => {
   // Red team 2026-10-27 finding 4: the old gate trusted the newest
@@ -71,8 +131,41 @@ test("case history: no requester means no requester line", () => {
   assert.ok(!out.includes("**Requester:**"), "no requester line");
 });
 
-test("piArgs: question rides as a positional after `--`", () => {
-  const args = piArgs(cfg, { question: "why did upload 13297 fail?", sessionId: "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0" });
+test("validateRunInputs: non-UUID session id is rejected (threads.json is untrusted)", () => {
+  for (const bad of ["--tools=*", "--print x", "1234", "", "../../etc"]) {
+    assert.throws(
+      () => validateRunInputs({ question: "q", sessionId: bad }),
+      /invalid session id/,
+      `rejects ${JSON.stringify(bad)}`,
+    );
+  }
+  // The real id format — including the uppercase form Slack might echo back —
+  // passes; the wrapper re-validates case-insensitively too.
+  validateRunInputs({ question: "q", sessionId: SESSION_ID });
+});
+
+test("validateRunInputs: empty or whitespace-only question is rejected", () => {
+  assert.throws(() => validateRunInputs({ question: "", sessionId: SESSION_ID }), /empty question/);
+  assert.throws(() => validateRunInputs({ question: "   ", sessionId: SESSION_ID }), /empty question/);
+});
+
+test("validateRunInputs: question exceeding the 32k argv cap is rejected", () => {
+  assert.throws(
+    () => validateRunInputs({ question: "x".repeat(MAX_QUESTION_CHARS + 1), sessionId: SESSION_ID }),
+    new RegExp(`exceeds ${MAX_QUESTION_CHARS} characters`),
+  );
+  // Exactly at the cap passes — the check is `>`, not `>=`.
+  validateRunInputs({ question: "x".repeat(MAX_QUESTION_CHARS), sessionId: SESSION_ID });
+});
+
+test("wrapper: question rides as the sole positional after `--`", () => {
+  // The wrapper owns pi's argv now; the `--` end-of-options separator must
+  // survive so a dash-led question is never parsed as a flag.
+  const tmp = mkdtempSync(join(tmpdir(), "pe-wrap-"));
+  const mockPi = writeMockPi(tmp);
+  const r = runWrapper([tmp, SESSION_ID, "why did upload 13297 fail?"], { PI_BIN: mockPi });
+  assert.equal(r.status, 0, `wrapper failed: ${r.stderr}`);
+  const args = argvOf(tmp);
   const sep = args.indexOf("--");
   assert.ok(sep > 0, "`--` separator present");
   assert.equal(args[sep + 1], "why did upload 13297 fail?", "question is the sole positional");
@@ -80,52 +173,79 @@ test("piArgs: question rides as a positional after `--`", () => {
   assert.equal(args[0], "--print", "still a print run");
 });
 
-test("piArgs: leading-dash question is not parsed as an option (2026-10-26 #dev thread)", () => {
+test("wrapper: leading-dash question is not parsed as an option (2026-10-26 #dev thread)", () => {
   // Real failing case: mention-stripped text kept its leading dash and pi
   // exited 1 with `Error: Unknown option: - ...` → "Investigation failed."
   const question = stripMention(
     "<@U0CAH280B6E> - I just tried to submit a report and upload a photo",
   );
   assert.equal(question, "- I just tried to submit a report and upload a photo");
-  const args = piArgs(cfg, { question, sessionId: "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0" });
+  const tmp = mkdtempSync(join(tmpdir(), "pe-wrap-"));
+  const mockPi = writeMockPi(tmp);
+  const r = runWrapper([tmp, SESSION_ID, question], { PI_BIN: mockPi });
+  assert.equal(r.status, 0, `wrapper failed: ${r.stderr}`);
+  const args = argvOf(tmp);
   const sep = args.indexOf("--");
   assert.equal(args[sep + 1], question, "question verbatim after --, not eaten as a flag");
   assert.equal(args.lastIndexOf(question), sep + 1, "dashed question sits after --");
 });
 
-test("piArgs: session routing and --no-approve precede the separator", () => {
-  const args = piArgs(cfg, { question: "q", sessionId: "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0" });
+test("wrapper: session routing and --no-approve precede the separator; sessions live in the workdir", () => {
+  // Sessions moved INSIDE the case workdir (<workdir>/sessions) — the only
+  // host path the container can write — not under state/sessions.
+  const tmp = mkdtempSync(join(tmpdir(), "pe-wrap-"));
+  const mockPi = writeMockPi(tmp);
+  const r = runWrapper([tmp, SESSION_ID, "q"], { PI_BIN: mockPi });
+  assert.equal(r.status, 0, `wrapper failed: ${r.stderr}`);
+  const args = argvOf(tmp);
   const sep = args.indexOf("--");
   assert.deepEqual(args.slice(0, sep), [
     "--print",
-    "--session-id", "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0",
-    "--session-dir", "/var/lib/pizza-eagle/sessions",
+    "--session-id", SESSION_ID,
+    "--session-dir", join(tmp, "sessions"),
     "--no-approve",
   ]);
 });
 
-test("piArgs: --no-approve declines pi project trust (no --approve anywhere)", () => {
+test("wrapper: --no-approve declines pi project trust (no --approve anywhere)", () => {
   // A planted .pi/extensions/*.ts in the pi-writable workdir executes on
   // the next `--approve` run (verified on pi 1.4.0). The bot never needs
   // project trust: AGENTS.md loads regardless of it.
-  const args = piArgs(cfg, { question: "q", sessionId: "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0" });
+  const tmp = mkdtempSync(join(tmpdir(), "pe-wrap-"));
+  const mockPi = writeMockPi(tmp);
+  const r = runWrapper([tmp, SESSION_ID, "q"], { PI_BIN: mockPi });
+  assert.equal(r.status, 0, `wrapper failed: ${r.stderr}`);
+  const args = argvOf(tmp);
   assert.ok(!args.includes("--approve"), "--approve must not appear (exact match)");
   assert.ok(!args.some((a) => a.startsWith("--approve")), "no --approve/-a form either");
   assert.ok(args.includes("--no-approve"), "--no-approve present");
 });
 
-test("piArgs: non-UUID session id is rejected (threads.json is untrusted)", () => {
-  for (const bad of ["--tools=*", "--print x", "1234", "", "../../etc"]) {
-    assert.throws(
-      () => piArgs(cfg, { question: "q", sessionId: bad }),
-      /invalid session id/,
-      `rejects ${JSON.stringify(bad)}`,
-    );
-  }
-  assert.throws(() => piArgs(cfg, { question: "   ", sessionId: "0f1e2d3c-4b5a-6978-8796-a5b4c3d2e1f0" }), /empty question/);
+test("wrapper: re-validates session id, question length, and workdir (defense in depth)", () => {
+  // The wrapper is a standalone boundary: anything that ever invokes it gets
+  // the same validation investigate.ts applies pre-spawn.
+  const tmp = mkdtempSync(join(tmpdir(), "pe-wrap-"));
+
+  // Untrusted session id (threads.json round-trips it) is refused.
+  const badId = runWrapper([tmp, "--tools=*", "q"]);
+  assert.notEqual(badId.status, 0, "invalid session id must be refused");
+  assert.match(badId.stderr, /invalid session id/);
+
+  // An oversized question is refused before any process runs.
+  const tooLong = runWrapper([tmp, SESSION_ID, "x".repeat(MAX_QUESTION_CHARS + 1)]);
+  assert.notEqual(tooLong.status, 0, "oversized question must be refused");
+  assert.match(tooLong.stderr, /exceeds 32000 characters/);
+
+  // A nonexistent workdir is refused (nothing is created on its behalf).
+  const noDir = runWrapper([join(tmp, "nope"), SESSION_ID, "q"]);
+  assert.notEqual(noDir.status, 0, "missing workdir must be refused");
+  assert.match(noDir.stderr, /workdir does not exist/);
 });
 
-test("childEnv: bot Slack credentials never reach the pi child env", () => {
+test("wrapperEnv: explicit allowlist — Slack tokens are structurally absent", () => {
+  // The old childEnv() SCRUBBED tokens from an inherited env; the new boundary
+  // sends an explicit allowlist instead — omission by construction, not by
+  // remembering every alias a token might ride under.
   const env = {
     PATH: "/usr/bin:/bin",
     HOME: "/home/pizza-eagle",
@@ -133,19 +253,151 @@ test("childEnv: bot Slack credentials never reach the pi child env", () => {
     SLACK_BOT_TOKEN: cfg.slackBotToken,
     SLACK_TOKEN_ALIAS: cfg.slackBotToken, // same value under a friendlier name
     OPENROUTER_KEY_PIZZA: "sk-or-xyz", // pi's model key — must pass
-    AWS_PROFILE: "ptp-agent", // read-only triage — must pass
+    GA_PROPERTY_ID: "123456", // ga.mjs default property — must pass
+    ZAPIER_MCP_URL: "https://mcp.example", // zapier harness MCP — must pass
   };
-  const out = childEnv(cfg, env);
-  assert.equal(out.SLACK_APP_TOKEN, undefined, "app token stripped");
-  assert.equal(out.SLACK_BOT_TOKEN, undefined, "bot token stripped");
-  assert.equal(out.SLACK_TOKEN_ALIAS, undefined, "token alias stripped by value");
+  const out = wrapperEnv(cfg, env);
+  assert.equal(out.SLACK_APP_TOKEN, undefined, "app token absent");
+  assert.equal(out.SLACK_BOT_TOKEN, undefined, "bot token absent");
+  assert.equal(out.SLACK_TOKEN_ALIAS, undefined, "token alias absent (allowlist, not scrub)");
   assert.equal(out.OPENROUTER_KEY_PIZZA, "sk-or-xyz", "model key passes");
-  assert.equal(out.AWS_PROFILE, "ptp-agent", "aws profile passes");
+  assert.equal(out.GA_PROPERTY_ID, "123456", "GA property passes");
+  assert.equal(out.ZAPIER_MCP_URL, "https://mcp.example", "zapier MCP endpoint passes");
   assert.equal(out.PATH, "/usr/bin:/bin");
+  assert.equal(out.HOME, "/home/pizza-eagle");
 });
 
-test("childEnv: cfg tokens are stripped even under unknown names", () => {
-  const out = childEnv(cfg, { WHATEVER_HELPER: cfg.slackBotToken, KEEP: "1" });
-  assert.equal(out.WHATEVER_HELPER, undefined, "value match strips aliases");
-  assert.equal(out.KEEP, "1");
+test("wrapperEnv: wrapper knobs ride as explicit env from cfg", () => {
+  const out = wrapperEnv(cfg, {});
+  assert.deepEqual(Object.keys(out).sort(), ["INV_IMAGE", "INV_USER", "PI_AGENT_DIR", "PI_BIN"]);
+  assert.equal(out.INV_IMAGE, cfg.invImage);
+  assert.equal(out.INV_USER, cfg.invUser);
+  assert.equal(out.PI_BIN, cfg.piBin);
+  assert.equal(out.PI_AGENT_DIR, cfg.piAgentDir);
+});
+
+test("wrapperEnv: empty-string allowlist values are dropped, not forwarded as blanks", () => {
+  const out = wrapperEnv(cfg, { PATH: "/bin", OPENROUTER_KEY_PIZZA: "" });
+  assert.equal(out.OPENROUTER_KEY_PIZZA, undefined, "blank value not forwarded");
+  assert.equal(out.PATH, "/bin");
+});
+
+test("wrapperEnv: unknown keys are never forwarded even when harmless", () => {
+  const out = wrapperEnv(cfg, { WHATEVER_HELPER: cfg.slackBotToken, KEEP: "1" });
+  assert.equal(out.WHATEVER_HELPER, undefined);
+  assert.equal(out.KEEP, undefined, "allowlist: anything not enumerated is absent");
+});
+
+test("runInvestigation: spawns the wrapper with the 3-arg contract, minimal env, and pre-run bookkeeping", async () => {
+  const tmp = mkdtempSync(join(tmpdir(), "pe-inv-"));
+  const agentDir = mkdtempSync(join(tmpdir(), "pe-agents-"));
+  writeFileSync(join(agentDir, "AGENTS.md"), "# operator context\n");
+  const wrapper = join(tmp, "mock-wrapper.sh");
+  writeFileSync(
+    wrapper,
+    [
+      "#!/usr/bin/env bash",
+      "# mock wrapper: records the listener's contract into the workdir (the",
+      "# only writable surface, mirroring the real wrapper), then answers.",
+      "set -euo pipefail",
+      'WORKDIR="$1"',
+      "{",
+      '  echo "argCount=$#"',
+      '  echo "workdir=$WORKDIR"',
+      '  echo "sessionId=$2"',
+      '  echo "question=$3"',
+      '  echo "requestAuthAtSpawn=$([[ -f "$WORKDIR/request-auth.json" ]] && echo present || echo missing)"',
+      '  echo "historyQAtSpawn=$(grep -c \'Q:\' "$WORKDIR/case-history.md" 2>/dev/null || true)"',
+      '  echo "INV_USER=${INV_USER:-}"',
+      '  echo "INV_IMAGE=${INV_IMAGE:-}"',
+      '  echo "PI_BIN=${PI_BIN:-}"',
+      '  echo "PI_AGENT_DIR=${PI_AGENT_DIR:-}"',
+      '  echo "SLACK_APP_TOKEN=${SLACK_APP_TOKEN+x}"',
+      '  echo "SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN+x}"',
+      '  echo "OPENROUTER_KEY_PIZZA=${OPENROUTER_KEY_PIZZA:-}"',
+      '} > "$WORKDIR/wrapper-capture.txt"',
+      'echo "mock answer"',
+      "",
+    ].join("\n"),
+  );
+  chmodSync(wrapper, 0o755);
+
+  const { answer, durationMs } = await runInvestigation(
+    { ...cfg, invWrapper: wrapper, agentDir },
+    { question: "why did upload 13297 fail?", sessionId: SESSION_ID, workdir: tmp },
+  );
+  assert.equal(answer, "mock answer");
+  assert.ok(durationMs >= 0, "duration recorded");
+
+  const cap = readFileSync(join(tmp, "wrapper-capture.txt"), "utf8");
+  // 3-arg argv contract: workdir, session id, question.
+  assert.ok(cap.includes("argCount=3"), "wrapper gets exactly three args");
+  assert.ok(cap.includes(`sessionId=${SESSION_ID}`), "session id forwarded");
+  assert.ok(cap.includes("question=why did upload 13297 fail?"), "question forwarded verbatim");
+  // Bookkeeping happens BEFORE the run: the listener's auth record and the
+  // case-file Q line must already exist when the wrapper starts.
+  assert.ok(cap.includes("requestAuthAtSpawn=present"), "request-auth.json written before the run");
+  assert.ok(cap.includes("historyQAtSpawn=1"), "case-history Q line written before the run");
+  // Config knobs forwarded as env; Slack tokens structurally absent.
+  assert.ok(cap.includes(`INV_USER=${cfg.invUser}`));
+  assert.ok(cap.includes(`INV_IMAGE=${cfg.invImage}`));
+  assert.ok(cap.includes(`PI_BIN=${cfg.piBin}`));
+  assert.ok(cap.includes(`PI_AGENT_DIR=${cfg.piAgentDir}`));
+  assert.ok(!cap.includes("SLACK_APP_TOKEN=x"), "Slack app token never reaches the wrapper env");
+  assert.ok(!cap.includes("SLACK_BOT_TOKEN=x"), "Slack bot token never reaches the wrapper env");
+
+  // AGENTS.md operator context copied into the workdir (idempotent).
+  assert.ok(existsSync(join(tmp, "AGENTS.md")), "AGENTS.md copied into the workdir");
+
+  // Listener-owned request-auth (re-check post-run: runInvestigation must not
+  // let the mock wrapper's answer change it).
+  const auth = JSON.parse(readFileSync(join(tmp, "request-auth.json"), "utf8"));
+  assert.equal(auth.requester, null);
+  assert.equal(auth.writeAllowed, false);
+
+  // Case file: Q before the run, answer + separator after it.
+  const hist = readFileSync(join(tmp, "case-history.md"), "utf8");
+  assert.ok(hist.includes("**Q:** why did upload 13297 fail?"), "question logged");
+  assert.ok(hist.includes("mock answer"), "answer logged");
+  assert.ok(hist.endsWith("---\n\n"), "entry closed with separator");
+});
+
+test("runInvestigation: non-zero wrapper exit fails the run with the stderr tail", async () => {
+  const tmp = mkdtempSync(join(tmpdir(), "pe-inv-"));
+  const wrapper = join(tmp, "mock-wrapper.sh");
+  writeFileSync(wrapper, "#!/usr/bin/env bash\necho 'mock wrapper: rds data api unreachable' >&2\nexit 3\n");
+  chmodSync(wrapper, 0o755);
+  await assert.rejects(
+    () =>
+      runInvestigation({ ...cfg, invWrapper: wrapper }, {
+        question: "q",
+        sessionId: SESSION_ID,
+        workdir: tmp,
+      }),
+    (e: unknown) => {
+      assert.ok(e instanceof InvestigationError, "failures are InvestigationError");
+      assert.match((e as InvestigationError).message, /code 3/);
+      assert.match((e as InvestigationError).stderr, /rds data api unreachable/, "stderr tail captured");
+      return true;
+    },
+  );
+  // The failed run still closes the case file (best-effort) with a stub.
+  const hist = readFileSync(join(tmp, "case-history.md"), "utf8");
+  assert.ok(hist.includes("(no output)"), "empty answer stubbed in the case file");
+});
+
+test("runInvestigation: missing wrapper fails fast instead of hanging", async () => {
+  // The wrapper is an external script that may be absent on a fresh checkout.
+  // spawn() then emits only 'error' (never 'exit'); the run must reject, not
+  // hang the listener forever.
+  const tmp = mkdtempSync(join(tmpdir(), "pe-inv-"));
+  await assert.rejects(
+    () =>
+      runInvestigation({ ...cfg, invWrapper: join(tmp, "does-not-exist.sh") }, {
+        question: "q",
+        sessionId: SESSION_ID,
+        workdir: tmp,
+      }),
+    InvestigationError,
+  );
 });
