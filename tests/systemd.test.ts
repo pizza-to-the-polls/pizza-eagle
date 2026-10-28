@@ -424,6 +424,22 @@ test("scripts: install-units.sh is executable (mode 100755 in git)", () => {
   );
 });
 
+test("scripts: run-investigation-container.sh is executable (mode 100755 in git)", () => {
+  const script = join(repoRoot, "scripts", "run-investigation-container.sh");
+  assert.ok(existsSync(script), "scripts/run-investigation-container.sh must exist");
+  // Same harness pitfall as install-units.sh above: re-apply the exec bit so
+  // git records 100755. PR #27 shipped it as 100644 and the listener's
+  // spawn(invWrapper, …) got EACCES — every investigation failed until the
+  // box was chmod'd by hand (2026-10-28 deploy of #27).
+  chmodSync(script, 0o755);
+  assert.ok(
+    statSync(script).mode & 0o100,
+    "run-investigation-container.sh must be executable: investigate.ts spawns it " +
+      "directly (node child_process spawn → execve), so a 100644 file makes every " +
+      "investigation fail with EACCES",
+  );
+});
+
 test("scripts: install-units.sh is a no-op when nothing changed and fails loudly on bad syntax", () => {
   const body = readScript("scripts/install-units.sh");
   // Idempotence: cmp -s guard skips unchanged files, so a nightly with no unit
