@@ -4,6 +4,7 @@ import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { load } from "js-yaml";
 
 /**
  * Unit drift guard (2026-10-26 backup outage post-mortem).
@@ -154,5 +155,175 @@ test("scripts: self-check takes env from the systemd-injected process env, never
     body,
     /const\s+env\s*=\s*process\.env/,
     "self-check must source env from process.env (systemd EnvironmentFile)",
+  );
+});
+
+/**
+ * 2026-10-28 stale-bot incident. A dirty tracked path (npm ci replaced #11's
+ * node_modules symlink with a real directory) made the nightly
+ * `git pull --ff-only` abort ("local changes would be overwritten"), the
+ * unit failed, and the bot stayed `active` on stale code — missing two
+ * red-team hardening PRs — until a human SSM'd in to repair the box.
+ *
+ * /opt/pizza-eagle is a deployment; GitHub is the source of truth, so a
+ * dirty tree must self-heal (reset --hard + clean -fd) before the pull.
+ * The same guard must exist in the update-agent SSM command list in
+ * .github/workflows/deploy.yml, which runs the identical command sequence.
+ */
+
+const UPDATE_UNIT = "pizza-eagle-update.service";
+
+/** git clean must never take -x/-X: that would delete the git-ignored
+ * state/ (usage ledger, case history) and dist/ runtime data. Matches both
+ * bare `git clean -fdx` and the repo-anchored `-C /opt/pizza-eagle clean -x`. */
+const CLEAN_UNSAFE = /\bclean\s+-[a-zA-Z]*[xX]/;
+
+const RUNUSER = "runuser -u pizza-eagle -- env HOME=/home/pizza-eagle";
+
+function execLines(lines: string[]): string[] {
+  return lines.filter((l) => /^\s*Exec(StartPre|Start|StartPost)\s*=/.test(l));
+}
+
+function readUnit(name: string): string[] {
+  const svc = sections(readFileSync(join(systemdDir, name), "utf8")).get("Service");
+  assert.ok(svc, `${name}: missing [Service] section`);
+  return svc;
+}
+
+test(`units: ${UPDATE_UNIT} has a dirty-tree guard ExecStartPre that self-heals`, () => {
+  const svc = readUnit(UPDATE_UNIT);
+  const guard = execLines(svc).find((l) => l.includes("status --porcelain"));
+  assert.ok(guard, "missing dirty-tree guard: no Exec* line runs git status --porcelain");
+  assert.match(
+    guard!,
+    /^\s*ExecStartPre=/,
+    "guard must be ExecStartPre (runs before the pull, failure aborts the unit)",
+  );
+  assert.ok(
+    guard!.includes(RUNUSER),
+    "guard must run as pizza-eagle via runuser (root git: dubious ownership, exit 128)",
+  );
+  assert.ok(
+    guard!.includes("reset --hard HEAD"),
+    "guard must discard uncommitted changes (deployment box: GitHub is the source of truth)",
+  );
+  assert.ok(
+    guard!.includes("clean -fd"),
+    "guard must remove untracked non-ignored files",
+  );
+  assert.doesNotMatch(
+    guard!,
+    CLEAN_UNSAFE,
+    "git clean must never use -x/-X: git-ignored state/ (usage ledger, case history) and dist/ must survive",
+  );
+});
+
+test(`units: ${UPDATE_UNIT} fails loudly if the tree is still dirty after self-heal`, () => {
+  const svc = readUnit(UPDATE_UNIT);
+  const pre = execLines(svc).filter((l) => /^\s*ExecStartPre=/.test(l));
+  const verify = pre.find((l) => l.includes("exit 1") && l.includes("status --porcelain"));
+  assert.ok(
+    verify,
+    "missing belt-and-suspenders ExecStartPre: a tree still dirty after self-heal " +
+      "must fail the unit (OnFailure alert) instead of the pull dying with a confusing git error",
+  );
+  assert.ok(verify!.includes(RUNUSER), "verify step must also run as pizza-eagle via runuser");
+});
+
+test(`units: ${UPDATE_UNIT} ordering: guard → pull → dnf → npm ci → build → restart`, () => {
+  const svc = readUnit(UPDATE_UNIT);
+  const execs = execLines(svc);
+  const idx = (needle: string) => execs.findIndex((l) => l.includes(needle));
+  const guard = idx("status --porcelain");
+  const pull = idx("git -C /opt/pizza-eagle pull --ff-only");
+  const dnf = idx("dnf update -y nodejs");
+  const npmCi = idx("npm ci --omit=dev");
+  const build = idx("npm run build");
+  const restart = idx("systemctl restart pizza-eagle.service");
+  for (const [label, i] of [
+    ["dirty-tree guard (git status --porcelain)", guard],
+    ["git pull --ff-only", pull],
+    ["dnf update -y nodejs", dnf],
+    ["npm ci --omit=dev", npmCi],
+    ["npm run build", build],
+    ["systemctl restart pizza-eagle.service", restart],
+  ] as const) {
+    assert.notEqual(i, -1, `missing Exec* step: ${label}`);
+  }
+  assert.ok(guard! < pull!, "dirty-tree guard must run before the pull (2026-10-28: pull aborted on a dirty tree and the bot ran stale code)");
+  assert.ok(pull! < dnf!, "pull must run before dnf");
+  assert.ok(dnf! < npmCi!, "dnf must run before npm ci");
+  assert.ok(npmCi! < build!, "npm ci must run before build");
+  assert.ok(build! < restart!, "build must run before restart");
+});
+
+test("units: every git/npm step touching the repo runs as pizza-eagle via runuser", () => {
+  for (const f of unitFiles) {
+    const body = readFileSync(join(systemdDir, f), "utf8");
+    for (const line of execLines(sections(body).get("Service") ?? [])) {
+      // Repo-touching steps only: git against the deployment checkout, and
+      // the ci/build steps that write into it. (Other npm invocations, e.g.
+      // backup's `npm run backup`, are out of scope here.)
+      if (/\bgit -C \/opt\/pizza-eagle\b/.test(line) || /\bnpm (ci|run build)\b/.test(line)) {
+        assert.ok(
+          line.includes(RUNUSER),
+          `${f}: git/npm step must run as pizza-eagle via runuser — root's git refuses ` +
+            `the repo ("dubious ownership", exit 128) and root's npm leaves root-owned artifacts ` +
+            "(the silent nightly failures of 2026-10-24..25): " +
+            line.trim(),
+        );
+      }
+    }
+  }
+});
+
+/** The update-agent SSM command list mirrors the nightly unit exactly —
+ * it must carry the same dirty-tree guard or "update the box now" stays
+ * broken whenever the nightly is. */
+function ssmCommands(): string[] {
+  const workflow = readFileSync(join(repoRoot, ".github", "workflows", "deploy.yml"), "utf8");
+  const doc = load(workflow) as {
+    jobs?: { deploy?: { steps?: { name?: string; run?: string }[] } };
+  };
+  const steps = doc.jobs?.deploy?.steps ?? [];
+  const ssm = steps.find((s) => s.name === "Update agent on the box (SSM)");
+  const runScript = ssm?.run;
+  assert.ok(runScript, "deploy.yml: missing 'Update agent on the box (SSM)' step");
+  // The run block passes the command list as shell-quoted JSON: --parameters 'commands=[...]'
+  const m = /--parameters 'commands=\[([\s\S]*?)\]'/.exec(runScript);
+  assert.ok(m, "deploy.yml: SSM step must pass a 'commands=[...]' JSON array");
+  const commands = JSON.parse(`[${m[1]}]`) as string[];
+  assert.ok(commands.length > 0, "deploy.yml: SSM commands array is empty");
+  return commands;
+}
+
+test("deploy.yml: update-agent SSM list starts with the dirty-tree guard, then the pull", () => {
+  const commands = ssmCommands();
+  const guard = commands.findIndex((c) => c.includes("status --porcelain") && c.includes("reset --hard HEAD"));
+  const pull = commands.findIndex((c) => c.includes("git -C /opt/pizza-eagle pull --ff-only"));
+  assert.notEqual(guard, -1, "SSM list missing dirty-tree guard (git status --porcelain + reset --hard)");
+  assert.notEqual(pull, -1, "SSM list missing git pull --ff-only");
+  assert.equal(guard, 0, "guard must be the FIRST command in the SSM list");
+  assert.ok(guard! < pull!, "guard must run before the pull");
+  for (const c of commands) {
+    assert.doesNotMatch(c, CLEAN_UNSAFE, "SSM git clean must never use -x/-X: ignored state/ + dist/ must survive");
+  }
+  const guardCmd = commands[guard!];
+  assert.ok(guardCmd.includes("clean -fd"), "guard must remove untracked non-ignored files");
+  // Every git invocation in the SSM list runs as pizza-eagle (root git:
+  // "dubious ownership", exit 128 — the silent-failure mode of 2026-10-24..25).
+  for (const c of commands) {
+    if (c.includes("git -C /opt/pizza-eagle")) {
+      assert.ok(
+        c.includes("runuser -u pizza-eagle"),
+        `SSM command runs git as root: ${c}`,
+      );
+    }
+  }
+  // Belt-and-suspenders: a still-dirty tree after self-heal must abort the
+  // SSM script loudly (exit 1, visible in the GitHub Actions run).
+  assert.ok(
+    commands.some((c) => c.includes("exit 1") && c.includes("status --porcelain")),
+    "SSM list missing verify-clean step (exit 1 if still dirty after self-heal)",
   );
 });
