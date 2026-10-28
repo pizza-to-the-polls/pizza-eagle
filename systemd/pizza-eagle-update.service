@@ -18,6 +18,25 @@ WorkingDirectory=/opt/pizza-eagle
 # runuser inherits this unit's cwd; git/npm need HOME (npm cache).
 # --ff-only: never auto-merge; a diverged repo means the update fails
 # loudly (OnFailure above posts to Slack) and a human looks at it.
+#
+# Dirty-tree guard (2026-10-28 incident): a dirty tracked path (e.g. #11's
+# node_modules symlink that npm ci replaced with a real directory) made the
+# next `git pull --ff-only` abort with "local changes would be overwritten"
+# and left the bot running stale code until a human repaired the box.
+# /opt/pizza-eagle is a deployment; GitHub is the source of truth, so any
+# uncommitted change is bogus and safe to discard. Self-heal, then pull:
+#   reset --hard + clean -fd (NEVER -x/-X: state/ and dist/ are git-ignored
+#   runtime data — usage ledger, case history — and must survive).
+# The guard runs as pizza-eagle via runuser like the pull: root's git
+# refuses this repo ("dubious ownership", exit 128) — the silent-failure
+# mode of 2026-10-24..25. Dirty paths are echoed to stdout → journald
+# (journalctl -u pizza-eagle-update) for post-mortems.
+# Single physical line: systemd does not join ExecStart* line continuations.
+ExecStartPre=/usr/sbin/runuser -u pizza-eagle -- env HOME=/home/pizza-eagle /bin/bash -c 'dirty=$(git -C /opt/pizza-eagle status --porcelain); if [ -n "$dirty" ]; then echo "=== dirty-tree guard: unexpected uncommitted changes ==="; echo "$dirty"; echo "=== self-healing: git reset --hard HEAD + git clean -fd (ignored state/ + dist/ preserved) ==="; git -C /opt/pizza-eagle reset --hard HEAD; git -C /opt/pizza-eagle clean -fd; echo "=== dirty-tree guard: done, proceeding with pull ==="; fi'
+# Belt-and-suspenders: if the tree is STILL dirty after self-heal (reset/
+# clean failed on a lock or permissions error), fail the unit now so
+# OnFailure alerts instead of the pull dying with a confusing git error.
+ExecStartPre=/usr/sbin/runuser -u pizza-eagle -- env HOME=/home/pizza-eagle /bin/bash -c 'if [ -n "$(git -C /opt/pizza-eagle status --porcelain)" ]; then echo "dirty-tree guard: tree still dirty after self-heal" >&2; git -C /opt/pizza-eagle status --porcelain >&2; exit 1; fi'
 ExecStart=/usr/sbin/runuser -u pizza-eagle -- env HOME=/home/pizza-eagle git -C /opt/pizza-eagle pull --ff-only
 # Security: pull Node.js patch releases from NodeSource nightly (no-op when
 # current). Critical CVEs (e.g. the Oct 2026 RCE affecting 22.x) otherwise go
