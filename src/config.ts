@@ -6,6 +6,9 @@
  */
 
 import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 export interface Config {
   /** Slack app-level token (xapp-...) for Socket Mode */
@@ -16,8 +19,20 @@ export interface Config {
   allowedChannels: Set<string>;
   /** if non-empty, only these user IDs may trigger investigations */
   allowedUsers: Set<string>;
-  /** pi binary */
+  /** pi binary (also passed to the isolation wrapper for its fallback mode) */
   piBin: string;
+  /**
+   * Isolation wrapper for investigations (issue #5): investigate.ts spawns
+   * this instead of pi directly — it drops to a separate OS user and, when
+   * available, a rootless Podman container.
+   */
+  invWrapper: string;
+  /** container image the wrapper runs (mode 1) */
+  invImage: string;
+  /** OS user investigations run as (modes 1+2) — NOT the listener's user */
+  invUser: string;
+  /** pi agent config dir (~/.pi/agent) staged into the run by the wrapper */
+  piAgentDir: string;
   /** root for thread map, per-thread workdirs, pi session files */
   stateDir: string;
   /** operator context (AGENTS.md) copied into each workdir */
@@ -105,6 +120,15 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     allowedChannels: new Set(csv("ALLOWED_CHANNELS", e)),
     allowedUsers: new Set(csv("ALLOWED_USERS", e)),
     piBin: e.PI_BIN ?? "pi",
+    // Absolute by construction: investigate.ts spawns the wrapper with
+    // cwd = the case workdir, so a repo-relative path would resolve wrong.
+    // import.meta.url keeps it correct both from src/ (tsx) and dist/ (box).
+    invWrapper:
+      e.INV_WRAPPER ??
+      fileURLToPath(new URL("../scripts/run-investigation-container.sh", import.meta.url)),
+    invImage: e.INV_IMAGE ?? "pizza-eagle-investigation",
+    invUser: e.INV_USER ?? "pizza-eagle-inv",
+    piAgentDir: e.PI_AGENT_DIR ?? join(homedir(), ".pi", "agent"),
     stateDir: e.BOT_STATE_DIR ?? "./state",
     // repo-relative default: agent/ inside this repo (works from repo root
     // locally and from WorkingDirectory=/opt/pizza-eagle on the box)

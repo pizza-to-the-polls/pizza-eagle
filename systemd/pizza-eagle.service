@@ -21,8 +21,15 @@ StandardOutput=append:/var/log/pizza-eagle/bot.log
 StandardError=append:/var/log/pizza-eagle/bot.log
 Restart=always
 RestartSec=10
-# Hardening
-NoNewPrivileges=true
+# Hardening. NOTE (issue #5): NoNewPrivileges and RestrictSUIDSGID were
+# REMOVED here — both block exec'ing setuid sudo, which the investigation
+# wrapper (scripts/run-investigation-container.sh) needs to drop each pi
+# run to pizza-eagle-inv (issue #5's durable isolation boundary). The
+# listener loses those two knobs but gains a much stronger property: its
+# children run as a DIFFERENT user in a container, and sudoers confines
+# pizza-eagle to the single target pizza-eagle-inv (no root, no other
+# users — /etc/sudoers.d/pizza-eagle-investigation, written by bootstrap).
+# A compromised listener therefore still cannot escalate to root via sudo.
 PrivateTmp=true
 ProtectSystem=strict
 # 2026-10-27 red team hardening: the bot + its pi children never need
@@ -34,13 +41,21 @@ ProtectHostname=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectKernelLogs=yes
-RestrictSUIDSGID=yes
 LockPersonality=yes
 PrivateDevices=yes
+# Rootless podman (investigation containers) needs /dev/fuse for its
+# overlay storage — PrivateDevices=yes alone would hide it and every mode-1
+# investigation would fall back to mode 2. DeviceAllow composes with
+# PrivateDevices (DevicePolicy=closed + allowlist).
+DeviceAllow=char-fuse
 SystemCallArchitectures=native
 # pi writes locks/state under ~/.pi/agent — the bot user's home must be
-# writable despite ProtectHome=read-only (ReadWritePaths overrides it)
-ReadWritePaths=/opt/pizza-eagle/state /home/pizza-eagle /var/log/pizza-eagle
+# writable despite ProtectHome=read-only (ReadWritePaths overrides it).
+# /var/lib/pizza-eagle-inv: rootless podman's image store for the
+# investigation user — the wrapper (child of this service) runs podman as
+# pizza-eagle-inv, and ProtectSystem=strict would otherwise make that
+# path read-only.
+ReadWritePaths=/opt/pizza-eagle/state /home/pizza-eagle /var/log/pizza-eagle /var/lib/pizza-eagle-inv
 ProtectHome=read-only
 [Install]
 WantedBy=multi-user.target

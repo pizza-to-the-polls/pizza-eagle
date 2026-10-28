@@ -1,20 +1,32 @@
 /**
- * The investigation runner: one pi subprocess per question.
+ * The investigation runner: one ISOLATED pi run per question (issue #5).
  *
- *   pi --print --session-id <threadSessionId> --session-dir <state>/sessions "<question>"
- *     cwd = per-thread workdir (AGENTS.md operator context, case-history.md)
+ *   spawn(invWrapper, [workdir, sessionId, question])
+ *     └─ scripts/run-investigation-container.sh
+ *          └─ sudo -u pizza-eagle-inv podman run … pi --print …
  *
- * Why subprocess rather than the SDK: a crashed/hung run can never take
- * down the listener, and each run gets a clean tool environment. The
- * session id is stable per Slack thread, so follow-ups resume context.
+ * The pi child NO LONGER inherits the listener's OS user. The wrapper drops
+ * to `pizza-eagle-inv` and (on the box) runs pi inside a rootless Podman
+ * container — a prompt-injected investigation cannot read the listener's
+ * /proc/<pid>/environ (different PID namespace + UID), ptrace/signal the
+ * listener, or read state/ files outside its own case workdir. See the
+ * wrapper header and RUNBOOK for the full boundary and its limits.
  *
- * Credential boundary: this process runs as the `pizza-eagle` OS user with
- * the instance role (read-only triage policy) — pi's shell tools inherit
- * that. There is deliberately no write path to the DB from here.
+ * Why a subprocess at all (unchanged since PR #3): a crashed/hung run can
+ * never take down the listener, and each run gets a clean tool environment.
+ * The session id is stable per Slack thread, so follow-ups resume context.
+ * Sessions now live INSIDE the case workdir (<workdir>/sessions) — the only
+ * host path the container can write — not under state/sessions.
+ *
+ * Credential boundary: this listener passes the wrapper an explicit
+ * env ALLOWLIST (wrapperEnv below); Slack tokens are structurally absent.
+ * Everything the run needs from the listener user's HOME (pi config, GA/
+ * Bugsnag readonly creds) is staged per-run by the wrapper, never copied
+ * into the workdir.
  */
 
 import { spawn } from "node:child_process";
-import { appendFileSync, copyFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Config } from "./config.js";
 
@@ -41,69 +53,81 @@ export class InvestigationError extends Error {
 export const activeInvestigations = new Set<ReturnType<typeof spawn>>();
 
 /**
- * Build the argv for one pi run. The question rides as a single positional
- * Question text is user-controlled Slack input riding as the LAST argv
- * element AFTER `--` (end-of-options): it may itself start with "-"
- * (Slack users write "<@Pizza Eagle> - question" and stripMention keeps
- * the dash), and pi's CLI parser would otherwise reject it:
- * `Error: Unknown option: - ...` → exit 1 → "Investigation failed."
- * (2026-10-26 #dev thread).
+ * The question rides as the wrapper's argv[3] (its LAST argument — the
+ * wrapper passes it to pi after `--`, end-of-options, so a question that
+ * starts with "-" — Slack users write "<@Pizza Eagle> - question" — is not
+ * parsed as a flag; 2026-10-26 #dev thread). argv, not stdin: the wrapper
+ * validates it once and every isolation mode forwards it identically.
  *
- * `--no-approve` DECLINES pi project trust: the cwd (the case workdir)
- * is pi-writable via pi's own write/bash tools, so a planted
- * `.pi/extensions/*.ts` would otherwise EXECUTE inside pi on the next
- * run (`--approve` trusted project-local files; verified on pi 1.4.0:
- * `pi --print --approve` runs `.pi/extensions` code, `--no-approve`
- * does not). Also declines project `.pi/mcp.json` (arbitrary MCP
- * server = subprocess), `.pi/settings.json`, `.pi/skills|prompts|themes`,
- * and ancestor `.agents/skills`. Operator context is unaffected:
- * AGENTS.md loads regardless of project trust (verified).
+ * The 32k cap is argv practicality (single exec argument, wrapper-side
+ * check mirrors this one). A question long enough to trip this is abuse,
+ * not investigation.
  */
+export const MAX_QUESTION_CHARS = 32_000;
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export function piArgs(
-  cfg: Config,
-  opts: { question: string; sessionId: string },
-): string[] {
+/**
+ * Pre-spawn validation. Both values are untrusted: the session id
+ * round-trips through state/threads.json, the question is raw Slack text.
+ * The wrapper re-validates (defense in depth — it is also a standalone
+ * boundary), but these throws happen BEFORE any process exists.
+ */
+export function validateRunInputs(opts: { question: string; sessionId: string }): void {
   if (!UUID_RE.test(opts.sessionId)) {
-    // Bot-generated (randomUUID) in practice, but the value round-trips
-    // through state/threads.json — treat it as untrusted argv input.
     throw new Error(`invalid session id: ${JSON.stringify(opts.sessionId.slice(0, 64))}`);
   }
   if (!opts.question.trim()) {
     throw new Error("empty question");
   }
-  return [
-    "--print",
-    "--session-id", opts.sessionId,
-    "--session-dir", `${cfg.stateDir}/sessions`,
-    "--no-approve", // decline project trust — see header note
-    "--",
-    opts.question,
-  ];
+  if (opts.question.length > MAX_QUESTION_CHARS) {
+    throw new Error(`question exceeds ${MAX_QUESTION_CHARS} characters`);
+  }
 }
 
 /**
- * The pi child inherits this env — its bash tool runs as the bot OS user,
- * so anything here is one prompt-injected `printenv` away from a Slack
- * thread. Strip the listener's own Slack credentials (by name, and by
- * value so aliases can't smuggle them through). Everything else passes:
- * PATH/HOME, the AWS profile for read-only triage, and the env-keyed
- * model key pi needs (OPENROUTER_KEY_PIZZA).
+ * The wrapper's env: an explicit ALLOWLIST, not a scrub list.
+ *
+ * The old childEnv() stripped Slack tokens from an inherited env — but the
+ * child ran as the SAME OS user, so it could read the listener's own
+ * /proc/<pid>/environ anyway; the scrub only protected the child's copy.
+ * With the isolation boundary (different UID + PID namespace), the child
+ * cannot reach the listener's env at all — so the env we SEND can be
+ * minimal, and Slack tokens are absent by construction (an allowlist
+ * cannot leak by omission, aliasing, or a future env var nobody
+ * remembered to scrub).
+ *
+ * The wrapper itself forwards only this list (plus HOME/PATH it sets for
+ * the dropped user) into every isolation mode.
  */
-const BOT_SECRET_ENV = new Set(["SLACK_APP_TOKEN", "SLACK_BOT_TOKEN"]);
+const WRAPPER_ENV_ALLOWLIST = [
+  "PATH",
+  "HOME",
+  "TMPDIR",
+  "LANG",
+  "LC_ALL",
+  // pi's env-keyed model credential (or-pizza provider — see pi-config)
+  "OPENROUTER_KEY_PIZZA",
+  // investigation data sources / helpers
+  "GA_PROPERTY_ID", // ga.mjs default property
+  "ZAPIER_MCP_URL", // zapier harness MCP endpoint
+];
 
-export function childEnv(
+export function wrapperEnv(
   cfg: Config,
   env: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
   const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(env)) {
-    if (v === undefined) continue;
-    if (BOT_SECRET_ENV.has(k)) continue; // by name
-    if (v === cfg.slackAppToken || v === cfg.slackBotToken) continue; // by value (aliases)
-    out[k] = v;
+  for (const k of WRAPPER_ENV_ALLOWLIST) {
+    const v = env[k];
+    if (v !== undefined && v !== "") out[k] = v;
   }
+  // Wrapper knobs from config (they originate in env via loadConfig, but
+  // cfg is the single source of truth here).
+  out.INV_IMAGE = cfg.invImage;
+  out.INV_USER = cfg.invUser;
+  out.PI_BIN = cfg.piBin;
+  out.PI_AGENT_DIR = cfg.piAgentDir;
   return out;
 }
 
@@ -111,7 +135,14 @@ export async function runInvestigation(
   cfg: Config,
   opts: { question: string; sessionId: string; workdir: string; requester?: string; writeAllowed?: boolean },
 ): Promise<InvestigationResult> {
+  validateRunInputs(opts);
+
   mkdirSync(opts.workdir, { recursive: true });
+  // The case workdir is the exchange surface with the isolated
+  // investigation user (member of group pizza-eagle — bootstrap.sh):
+  // owner + group get rwx, world gets nothing. pi writes its session files
+  // under <workdir>/sessions from inside the boundary.
+  chmodSync(opts.workdir, 0o770);
 
   // Listener-owned per-run authorization record (see writeRequestAuth):
   // written BEFORE the run so the operator prompt and the helper scripts
@@ -128,11 +159,6 @@ export async function runInvestigation(
     console.warn(`[pizza-eagle] no AGENTS.md in AGENT_DIR (${cfg.agentDir}) — running bare`);
   }
 
-  const sessionsDir = `${cfg.stateDir}/sessions`;
-  mkdirSync(sessionsDir, { recursive: true });
-
-  const args = piArgs(cfg, opts);
-
   // Requester + question land in the case file BEFORE the pi run, so the
   // AGENTS.md write-gate can verify the requester from Slack event metadata
   // even on a thread's FIRST question. (2026-10-25 #dev thread: a publish
@@ -141,9 +167,13 @@ export async function runInvestigation(
   tryHistory(() => openHistory(opts.workdir, opts.question, opts.requester));
 
   const started = Date.now();
-  const child = spawn(cfg.piBin, args, {
+  // The wrapper owns everything below this point: privilege drop, staging
+  // (pi config + triage creds from the listener user's HOME), container
+  // lifecycle, and pi's argv (including the `--` question separator). It
+  // gets a THREE-argument argv and an allowlisted env — nothing else.
+  const child = spawn(cfg.invWrapper, [opts.workdir, opts.sessionId, opts.question], {
     cwd: opts.workdir,
-    env: childEnv(cfg),
+    env: wrapperEnv(cfg),
     stdio: ["ignore", "pipe", "pipe"],
   });
 
@@ -208,8 +238,14 @@ export async function runInvestigation(
  * suspicion rules). case-history.md Requester lines stay as transcript;
  * they are no longer auth.
  *
- * A tool-level compromise could still rewrite this file (same OS user) —
- * the durable fix for that is the per-run sandbox follow-up, not this file.
+ * Since the issue #5 boundary the investigation runs as a DIFFERENT OS
+ * user (pizza-eagle-inv, containerized) — but the case workdir remains
+ * pi-writable by design (it is the run's only workspace), so a tool-level
+ * compromise can still tamper with this file mid-run. The durable
+ * mitigations are the helper scripts' own enforcement (gh-token.mjs,
+ * publish-hotnready.sh re-read and independently act on it) and the usage
+ * ledger; the container boundary's job is the LISTENER's env, memory and
+ * state — not this file.
  */
 export function writeRequestAuth(
   workdir: string,
@@ -271,5 +307,10 @@ function exitOf(child: ReturnType<typeof spawn>): Promise<[number | null, string
       return;
     }
     child.on("exit", (code, signal) => resolve([code, signal]));
+    // A wrapper that cannot be spawned (missing, not executable) emits only
+    // 'error', never 'exit' — without this branch the run would hang forever
+    // instead of failing the investigation. The null code is reported as
+    // "pi exited with code ?." by the caller.
+    child.on("error", () => resolve([null, null]));
   });
 }

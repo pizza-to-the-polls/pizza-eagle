@@ -69,3 +69,32 @@ test("loadConfig: absent allowlists mean open access (empty sets)", () => {
 test("loadConfig: missing required vars throw", () => {
   assert.throws(() => loadConfig({ SLACK_BOT_TOKEN: "xoxb-1" } as NodeJS.ProcessEnv), /Missing required env var/);
 });
+
+// Issue #5 (durable investigation isolation): the listener spawns an isolation
+// wrapper instead of pi directly — these keys parameterize the boundary.
+
+test("loadConfig: investigation isolation keys default to the repo wrapper / image / inv user", () => {
+  const cfg = loadConfig({ ...validEnv } as NodeJS.ProcessEnv);
+  assert.match(
+    cfg.invWrapper,
+    /scripts[/\\]run-investigation-container\.sh$/,
+    "default wrapper is the repo isolation script (absolute — the spawn cwd is the case workdir)",
+  );
+  assert.equal(cfg.invImage, "pizza-eagle-investigation");
+  assert.equal(cfg.invUser, "pizza-eagle-inv", "investigations never run as the listener's OS user");
+  assert.ok(cfg.piAgentDir.length > 0, "pi agent config dir has a default");
+});
+
+test("loadConfig: investigation isolation keys are env-overridable", () => {
+  const cfg = loadConfig({
+    ...validEnv,
+    INV_WRAPPER: "/custom/wrapper.sh",
+    INV_IMAGE: "custom-image",
+    INV_USER: "custom-inv",
+    PI_AGENT_DIR: "/custom/agent",
+  } as NodeJS.ProcessEnv);
+  assert.equal(cfg.invWrapper, "/custom/wrapper.sh");
+  assert.equal(cfg.invImage, "custom-image");
+  assert.equal(cfg.invUser, "custom-inv");
+  assert.equal(cfg.piAgentDir, "/custom/agent");
+});

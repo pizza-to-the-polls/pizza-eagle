@@ -1,0 +1,53 @@
+# syntax=docker/dockerfile:1.7
+# pizza-eagle investigation image (issue #5) — the pi runtime + every tool
+# AGENTS.md instructs investigations to use. Built by
+# container/build-investigation-image.sh as pizza-eagle-inv (rootless
+# podman); run with:
+#
+#   --cap-drop ALL --security-opt no-new-privileges --pids-limit 64
+#   --read-only --network host
+#   -v <case workdir>:/workspace  -v <staged home>:/home/pi
+#
+# so the container's writable surface is exactly the case workdir plus a
+# per-run staged HOME (scripts/run-investigation-container.sh).
+#
+# --network host is deliberate: investigations reach the AWS APIs (RDS Data
+# API, CloudWatch, Secrets Manager reads), IMDS (instance role — read-only
+# triage policy, shared by design), OpenRouter and api.github.com. Egress
+# restriction beyond that is a tracked follow-up (local HTTP proxy);
+# confidentiality rests on the read-only IAM posture.
+FROM node:24-bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      ca-certificates curl git jq ripgrep \
+    && rm -rf /var/lib/apt/lists/*
+
+# GitHub CLI — investigations use `gh` for issue/PR reads and (gated by
+# request-auth.json) the write flows; tokens are minted per run by
+# scripts/gh-token.mjs, never baked into the image.
+RUN set -eux; \
+    curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      -o /usr/share/keyrings/githubcli-archive-keyring.gpg; \
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+      > /etc/apt/sources.list.d/github-cli.list; \
+    apt-get update && apt-get install -y --no-install-recommends gh; \
+    rm -rf /var/lib/apt/lists/*
+
+# AWS CLI v2 — RDS Data API / CloudWatch / Secrets Manager reads via the
+# instance role (IMDS at 169.254.169.254 is reachable because of --network
+# host; there is no ~/.aws in the container, so IMDS is the only provider).
+RUN set -eux; \
+    curl -fsSL https://awscli.amazonaws.com/awscli-2.tar.gz -o /tmp/awscli.tgz; \
+    tar xzf /tmp/awscli.tgz -C /tmp; \
+    /tmp/aws/install --install-dir /usr/local/aws --bin-dir /usr/local/bin; \
+    rm -rf /tmp/aws /tmp/awscli.tgz
+
+# The agent runtime. --ignore-scripts: no postinstall code from the
+# registry runs at build time.
+RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+
+# Fail the build, not the first investigation, if any of it is broken.
+RUN pi --version && aws --version && gh --version && rg --version | head -1
+
+WORKDIR /workspace
+ENTRYPOINT ["pi"]
