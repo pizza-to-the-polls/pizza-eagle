@@ -75,7 +75,11 @@ thread humans read.
 - **GitHub** (`gh`): repos `pizza-to-the-polls/pizzabase`, `pizza-to-the-polls/polls.pizza`, `pizza-to-the-polls/feedflag`.
 - Source checkouts: `~/Projects/pizzabase`, `~/Projects/polls.pizza`, `~/Projects/feedflag`.
 - **Opening PRs (P4 capability — only when the user asks for a code change
-  or asks you to open a PR):** first check **`request-auth.json`** in this
+  or asks you to open a PR, AND the routing section below sized it as an
+  inline attempt):** this flow is for **small** single-repo, single-PR
+  changes that fit the ~20-minute window. Larger or multi-repo/multi-PR
+  asks are never attempted inline — dispatch them as `agent:ready` issues
+  instead (see "Routing" below). First check **`request-auth.json`** in this
   directory — the listener writes it fresh before every run from the
   Slack event's authenticated metadata. `"writeAllowed": true` ⇒ the
   requester is an admin (`U2ZLJ2KBP` Scott, `U0B740NG8E6` Nina,
@@ -200,14 +204,78 @@ Useful relations: `reports.upload_id → uploads.id`,
 - Times: DB is UTC; US polling places are CT (UTC-5/-6). Slack timestamps
   are epoch seconds.
 
+## Routing — investigation vs. code change (size first)
+
+Classify and size every ask BEFORE starting anything. The investigation
+window is hard: a multi-repo, multi-PR coding ask has already been killed
+by the 20-minute timeout twice (2026-10-24, exit 143 both times), producing
+nothing. Being honest about scope up front is how work actually gets done.
+
+**Step 1 — Classify: investigation or code change?**
+
+- **Investigation (read-only)** — data lookups, log analysis, "why did X
+  happen": run inline, exactly as this file describes. Nothing changes.
+- **Code change** — a PR to open, a config edit, a page to publish: go to
+  step 2. Don't start the change yet.
+
+**Step 2 — Size the change.** Estimate wall-clock time to implement:
+
+- **Under ~20 minutes, single repo, single focused change** — a log line,
+  a config fix, a small script, a docs change. You **may attempt inline**:
+  state the estimate in your ack ("small — attempting inline, ~10 min"),
+  then follow the PR flow above with your existing powers (draft PR as
+  `pizza-eagle-agent` where the App is installed; hotnready publishes).
+- **Over ~20 minutes, or any multi-repo / multi-PR ask** — new routes,
+  migrations, multi-file features, "and also…" asks: **dispatch** (step
+  3). Do NOT attempt inline — the timeout data says these produce nothing
+  inside the window.
+
+**Step 3 — Dispatch mechanics.** One GitHub issue per repo/PR, labeled
+`agent:ready`, in the work repo (pizzabase, polls.pizza, hotnready —
+never pizza-eagle itself; the App isn't installed there). dd-agent's
+daemon auto-discovers labeled issues and runs its own plan → implement →
+checks → review → PR cycle per issue. GitHub is the bus — no new network
+path. Full procedure, issue-body template, and PII checklist live in the
+`dispatch` skill (`skills/dispatch/SKILL.md`; on the ops box
+`/opt/pizza-eagle/skills/dispatch/SKILL.md`). In short:
+
+1. Mint a scoped token:
+   `GH_TOKEN=$(node /opt/pizza-eagle/scripts/gh-token.mjs --repo pizza-to-the-polls/<repo>)`
+2. Draft the issue body per the template — context, acceptance criteria,
+   constraints, test expectations, condensed from the established triage
+   format (BACKLOG / existing `agent:ready` issues on pizzabase) — and
+   run the PII checklist below.
+3. `gh issue create --repo pizza-to-the-polls/<repo> --label agent:ready --title … --body-file …`
+   Multi-repo asks split into one issue per repo, dispatched together.
+4. Reply in the thread: "Dispatched as `pizzabase#NNN` (+ `polls.pizza#MMM`
+   if split) — agent PRs will follow. Ask me for status anytime in this
+   thread."
+
+**Hard rule — PII discipline for issue bodies (never violated):** all six
+org repos are PUBLIC. Issue bodies are world-readable and durable. They
+are written like a blog post: technical ask only. **Never** in an issue:
+DB rows, contact info (mask or omit), requester identities,
+`thread-context.md` verbatim, raw bucket paths, presigned URLs. Polling-
+place addresses are public info, but tying an issue to an individual
+uploader/reporter is off-limits. This parallels and extends the Slack
+masking rules below.
+
+**Status loop (pull-based — on mention only).** When a later mention in a
+dispatched thread asks "any news on this?", run read-only GitHub lookups
+and report real answers: `gh issue view <n> -R pizza-to-the-polls/<repo>`
+for state, assignee, and linked PR; `gh pr list -R <repo>` / `gh pr view`
+for checks status and review state. No polling daemon — you check status
+only when asked in the thread. If nothing has happened yet, say the issue
+is still in dd-agent's queue.
+
 ## Hard rules — scope discipline
 
-- **One investigation = one focused change.** If the ask spans multiple
-  repos, multiple substantial features, or multiple PRs, tell the user:
-  "this is [N] pieces of work — I'll tackle [first piece] now; re-mention
-  me for [second piece] in this thread and I'll pick it up with full
-  context." Then do the FIRST piece only. Multi-repo PR asks almost always
-  hit the 20-minute investigation timeout and produce nothing.
+- **One investigation = one focused change** for read-only work. For code
+  changes, the Routing section above governs: small single-change asks may
+  be attempted inline; anything larger or multi-part gets dispatched —
+  I'll dispatch each piece now, one `agent:ready` issue per repo/PR,
+  split and queued in a single reply. Never punt a multi-part ask back to
+  the human to re-ask; the split is my job.
 - **If an investigation times out** (exit code 143), the retry will also
   timeout if the scope hasn't changed. If you somehow get a second chance,
   reduce scope aggressively — deliver the smallest useful PR, not the
