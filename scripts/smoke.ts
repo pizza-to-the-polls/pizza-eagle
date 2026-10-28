@@ -7,6 +7,7 @@
  *
  * Run: npm run smoke
  */
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
@@ -92,7 +93,9 @@ async function main(): Promise<void> {
       AGENT_DIR: join(process.cwd(), "agent"),
       INVESTIGATE_TIMEOUT_MS: String(120_000),
     });
-    const sessionId = `smoke-${Date.now()}`;
+    // UUID: validateRunInputs (src/investigate.ts, PR #27) rejects anything a
+    // Slack thread could smuggle in — the smoke must use the real format.
+    const sessionId = randomUUID();
     const workdir = workdirFor(tmp, "9999.0001");
     const { answer } = await runInvestigation(cfg, {
       question: "Reply with exactly the word OK and nothing else.",
