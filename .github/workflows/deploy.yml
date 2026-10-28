@@ -86,6 +86,10 @@ jobs:
           # reset --hard + clean -fd (NEVER -x/-X: git-ignored state/ and
           # dist/ hold the usage ledger + case history and must survive).
           # Dirty paths + guard output are captured in the GitHub Actions run.
+          # Unit-sync (parity with pizza-eagle-update.service ExecStartPost):
+          # install changed unit files + daemon-reload before restarting the
+          # bot, so merged unit fixes go live here too instead of sitting
+          # dormant until a human hand-copies them (2026-10-28 issue).
           aws ssm send-command \
             --document-name "AWS-RunShellScript" \
             --targets "Key=tag:${INSTANCE_TAG_KEY},Values=${INSTANCE_TAG_VALUE}" \
@@ -97,6 +101,7 @@ jobs:
               "dnf update -y nodejs",
               "cd /opt/pizza-eagle && runuser -u pizza-eagle -- env HOME=/home/pizza-eagle /usr/bin/npm ci --omit=dev",
               "cd /opt/pizza-eagle && runuser -u pizza-eagle -- env HOME=/home/pizza-eagle /usr/bin/npm run build",
+              "/opt/pizza-eagle/scripts/install-units.sh",
               "systemctl restart pizza-eagle.service",
               "systemctl is-active pizza-eagle.service"]'
 

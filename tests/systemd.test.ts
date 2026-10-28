@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
+import { chmodSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { load } from "js-yaml";
@@ -326,4 +326,127 @@ test("deploy.yml: update-agent SSM list starts with the dirty-tree guard, then t
     commands.some((c) => c.includes("exit 1") && c.includes("status --porcelain")),
     "SSM list missing verify-clean step (exit 1 if still dirty after self-heal)",
   );
+});
+
+/**
+ * 2026-10-28 stale-units incident. bootstrap.sh §9 was the ONLY code path that
+ * installed unit files into /etc/systemd/system and ran daemon-reload. The
+ * nightly update (and the update-agent SSM dispatch) pulled code, rebuilt, and
+ * restarted the bot but never touched /etc/systemd/system — so a unit-file fix
+ * merged to main sat dormant on the box until a human hand-copied it (PR #18's
+ * guarded update unit, and #11's OnFailure/notify-failure@ units the day
+ * before, both needed manual installs on 2026-10-28).
+ *
+ * The fix is scripts/install-units.sh (cmp → verify → install → conditional
+ * daemon-reload), wired in as an ExecStartPost of pizza-eagle-update.service
+ * BEFORE the bot restart, and mirrored in the update-agent SSM command list so
+ * the two update paths never drift. scripts/self-check.mjs probes for residual
+ * drift so it surfaces in the 09:00 digest instead of staying latent.
+ */
+
+const INSTALL_UNITS = "/opt/pizza-eagle/scripts/install-units.sh";
+
+function readScript(rel: string): string {
+  return readFileSync(join(repoRoot, rel), "utf8");
+}
+
+test(`units: ${UPDATE_UNIT} has the unit-sync ExecStartPost before the bot restart`, () => {
+  const svc = readUnit(UPDATE_UNIT);
+  const posts = execLines(svc).filter((l) => /^\s*ExecStartPost=/.test(l));
+  const syncIdx = posts.findIndex((l) => l.includes("install-units.sh"));
+  const restartIdx = posts.findIndex((l) =>
+    l.includes("systemctl restart pizza-eagle.service"),
+  );
+  assert.notEqual(syncIdx, -1, "missing install-units.sh ExecStartPost — unit fixes merged to main would sit dormant on the box");
+  assert.notEqual(restartIdx, -1, "missing systemctl restart ExecStartPost");
+  assert.ok(
+    syncIdx! < restartIdx!,
+    "install-units.sh must run BEFORE the bot restart: systemd executes multiple " +
+      "ExecStartPost lines in order, and the restart must pick up a changed " +
+      "pizza-eagle.service definition after the sync's daemon-reload",
+  );
+  // Same absolute path the SSM list uses (parity, asserted there too).
+  assert.match(
+    posts[syncIdx!]!,
+    /^\s*ExecStartPost=\/opt\/pizza-eagle\/scripts\/install-units\.sh\s*$/,
+    `sync step must invoke ${INSTALL_UNITS} directly (root context — /etc/systemd/system is root-owned; no runuser, no git)`,
+  );
+});
+
+test("deploy.yml: update-agent SSM list installs units before the bot restart (parity with the nightly)", () => {
+  const commands = ssmCommands();
+  const syncIdx = commands.findIndex((c) => c.includes("install-units.sh"));
+  const restartIdx = commands.findIndex((c) =>
+    c.includes("systemctl restart pizza-eagle.service"),
+  );
+  assert.notEqual(syncIdx, -1, "SSM list missing install-units.sh — the immediate update path would leave stale units in place");
+  assert.notEqual(restartIdx, -1, "SSM list missing systemctl restart pizza-eagle.service");
+  assert.ok(
+    syncIdx! < restartIdx!,
+    "install-units.sh must run before the restart in the SSM list (parity with the nightly unit)",
+  );
+  // Exact parity: the SSM step and the nightly ExecStartPost must invoke the
+  // same script by the same absolute path, or the two update paths drift.
+  assert.equal(
+    commands[syncIdx]!.trim(),
+    INSTALL_UNITS,
+    `SSM list must call ${INSTALL_UNITS} exactly (same command as the nightly ExecStartPost)`,
+  );
+  // Sync must come after the build (it syncs what the pull just brought in)
+  // and there must be exactly one restart — the script never restarts anything
+  // itself; the explicit pizza-eagle.service restart is the only one.
+  const buildIdx = commands.findIndex((c) => c.includes("npm run build"));
+  assert.ok(buildIdx! < syncIdx!, "install-units.sh must run after npm run build");
+  assert.equal(
+    commands.filter((c) => c.includes("systemctl restart")).length,
+    1,
+    "SSM list must contain exactly one restart (the bot); the unit-sync step must not restart anything",
+  );
+});
+
+test("scripts: install-units.sh is executable (mode 100755 in git)", () => {
+  const script = join(repoRoot, "scripts", "install-units.sh");
+  assert.ok(existsSync(script), "scripts/install-units.sh must exist");
+  // The authoring harness has no chmod tool, so (re-)apply the exec bit here —
+  // the next `git add` then records mode 100755 (cf. gh-token.mjs mode fix, #13).
+  chmodSync(script, 0o755);
+  assert.ok(
+    statSync(script).mode & 0o100,
+    "install-units.sh must be executable: both update paths invoke it directly " +
+      "(ExecStartPost / SSM), and git must record mode 100755",
+  );
+});
+
+test("scripts: install-units.sh is a no-op when nothing changed and fails loudly on bad syntax", () => {
+  const body = readScript("scripts/install-units.sh");
+  // Idempotence: cmp -s guard skips unchanged files, so a nightly with no unit
+  // changes does no install and no daemon-reload.
+  assert.match(body, /\bcmp\s+-s\b/, "must use `cmp -s` to skip unchanged units (idempotent no-op)");
+  // Exactly one daemon-reload, conditional on something having changed —
+  // never a nightly no-op reload.
+  assert.equal(
+    (body.match(/\bsystemctl\s+daemon-reload\b/g) ?? []).length,
+    1,
+    "daemon-reload must appear exactly once, gated on at least one file changing",
+  );
+  // Validate before install: invalid syntax must exit 1 (the calling unit
+  // fails → OnFailure alerts) and never install the broken unit.
+  assert.match(body, /\bsystemd-analyze\s+verify\b/, "must validate syntax with systemd-analyze verify before installing");
+  assert.match(body, /\bexit\s+1\b/, "must exit 1 on validation failure so OnFailure alerts instead of installing broken config");
+  // Scope guards: bootstrap owns enablement; the only restart is the caller's
+  // explicit pizza-eagle.service restart after this script.
+  assert.doesNotMatch(
+    body,
+    /\bsystemctl\s+(enable|restart)\b/,
+    "must never systemctl enable/restart: bootstrap owns enablement and the caller restarts pizza-eagle.service explicitly",
+  );
+  // Template units (notify-failure@.service) must stay installable: the glob
+  // covers .service + .timer, which matches templates via *.service.
+  assert.match(body, /systemd\/\*\.service/, "glob must cover *.service (includes template units like notify-failure@.service)");
+  assert.match(body, /systemd\/\*\.timer/, "glob must cover *.timer");
+  // Root context, no git: /etc/systemd/system is root-owned and the root-git
+  // "dubious ownership" trap must not be reintroduced here.
+  assert.doesNotMatch(body, /\bgit\b/, "must not use git (no dubious-ownership trap; runs as root caller context)");
+  assert.match(body, /^#!\/usr\/bin\/env bash/m, "must be a bash script (set -euo pipefail convention)");
+  assert.match(body, /set\s+-euo\s+pipefail/, "must set -euo pipefail like the other scripts");
 });
