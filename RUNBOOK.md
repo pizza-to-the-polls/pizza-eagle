@@ -169,4 +169,4 @@ sandbox (separate tracked work).
 - **Slack app config**: whoever created it in api.slack.com (add a second admin)
 - **AWS account**: 320802729995, us-west-2, Identity Center SSO
 - **Retool resource**: SSH tunnel → `bastion.polls.pizza:22`, user `retool`
-- **GitHub App**: `pizza-eagle-agent` (id 5434163), installed on polls.pizza + pizzabase + hotnready
+- **GitHub App**: `pizza-eagle-agent` (id 5434163), installed on polls.pizza + pizzabase + hotnready + feedflag + zapier (2026-10-28: zapier added — pizza-eagle now owns zap-fleet changes end-to-end via the repo harness at `/opt/ptp-zapier-workflows`, no PR/review step; harness gates are the review)
