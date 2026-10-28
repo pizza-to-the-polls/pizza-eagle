@@ -45,4 +45,12 @@ ExecStart=/usr/sbin/runuser -u pizza-eagle -- env HOME=/home/pizza-eagle git -C 
 ExecStart=/usr/bin/dnf update -y nodejs
 ExecStart=/usr/sbin/runuser -u pizza-eagle -- env HOME=/home/pizza-eagle /usr/bin/npm ci --omit=dev
 ExecStart=/usr/sbin/runuser -u pizza-eagle -- env HOME=/home/pizza-eagle /usr/bin/npm run build
+# Unit-sync (2026-10-28 issue): the pull may have changed systemd/*.service or
+# systemd/*.timer — install them BEFORE the restart so the restart picks up the
+# fresh definition (bootstrap.sh §9 used to be the only installer; unit fixes
+# sat dormant on the box until a human hand-copied them). systemd runs multiple
+# ExecStartPost lines in order: sync + daemon-reload first, then the restart.
+# If pizza-eagle-update.service (this unit) itself changed mid-run, the current
+# run still uses the old definition; the next run picks the new one up — fine.
+ExecStartPost=/opt/pizza-eagle/scripts/install-units.sh
 ExecStartPost=/bin/systemctl restart pizza-eagle.service

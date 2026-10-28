@@ -12,8 +12,11 @@
  *   2. app token valid (apps.connections.open)
  *   3. bot secrets readable             6. heartbeat metric fresh (<15 min)
  *   4. backup tarball fresh (<26h)      7. service active (this runs on the box)
+ *                                       9. systemd units match the repo
  */
 import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { promisify } from "node:util";
 const sh = promisify(execFile);
 const AWS_REGION = "us-west-2";
@@ -110,6 +113,44 @@ try {
 } catch (e) {
   results.push(["✅", "usage ledger", "no ledger yet (first question will start it)"]);
 }
+
+// 9. systemd units match the repo — drift means a unit-file fix was merged to
+// main but never installed on the box (2026-10-28: PR #18's guarded update unit
+// was pulled but not installed; the alerting only worked after a human SSM'd
+// `install -m 644` + daemon-reload in). install-units.sh (nightly ExecStartPost
+// + SSM list) closes the gap; this probe makes any residual drift visible in
+// the 09:00 digest instead of latent. Installed units are mode 644
+// (world-readable), so reading them as User=pizza-eagle is fine.
+await check("systemd units match repo", async () => {
+  const repoDir = "/opt/pizza-eagle/systemd";
+  const unitDir = "/etc/systemd/system";
+  const names = readdirSync(repoDir).filter(
+    (f) => f.endsWith(".service") || f.endsWith(".timer"),
+  );
+  if (!names.length) throw new Error("no unit files in /opt/pizza-eagle/systemd");
+  const drift = [];
+  for (const name of names) {
+    const repo = readFileSync(`${repoDir}/${name}`);
+    const installed = existsSync(`${unitDir}/${name}`)
+      ? readFileSync(`${unitDir}/${name}`)
+      : null;
+    if (!installed) {
+      drift.push(`${name}: missing from ${unitDir}`);
+      continue;
+    }
+    // Digests rather than raw buffers: no file contents in the digest text.
+    const repoSum = createHash("sha256").update(repo).digest("hex");
+    const installedSum = createHash("sha256").update(installed).digest("hex");
+    if (repoSum !== installedSum) drift.push(`${name}: differs from repo`);
+  }
+  if (drift.length) {
+    throw new Error(
+      `unit drift: ${drift.join("; ")} — next update run installs them, ` +
+        "or run /opt/pizza-eagle/scripts/install-units.sh now",
+    );
+  }
+  return true;
+});
 
 // digest
 const icon = results.some(r => r[0] === "❌") ? ":rotating_light:" : ":white_check_mark:";
