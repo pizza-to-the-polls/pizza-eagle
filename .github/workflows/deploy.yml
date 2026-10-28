@@ -102,6 +102,7 @@ jobs:
               "cd /opt/pizza-eagle && runuser -u pizza-eagle -- env HOME=/home/pizza-eagle /usr/bin/npm ci --omit=dev",
               "cd /opt/pizza-eagle && runuser -u pizza-eagle -- env HOME=/home/pizza-eagle /usr/bin/npm run build",
               "/opt/pizza-eagle/scripts/install-units.sh",
+              "/opt/pizza-eagle/scripts/install-skills.sh",
               "systemctl restart pizza-eagle.service",
               "systemctl is-active pizza-eagle.service"]'
 
