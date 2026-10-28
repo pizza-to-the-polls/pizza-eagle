@@ -116,15 +116,20 @@ test("units: OnFailure= targets an installed notifier template", () => {
  */
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-test("repo: nothing outside tests/ references the dead /opt/pizza-eagle/.env", () => {
+test("repo: nothing outside tests/ and RUNBOOK.md references the dead /opt/pizza-eagle/.env", () => {
   const DEAD = "/opt/pizza-eagle/.env";
   // Scan tracked files only: CI checkouts match this exactly, and local
   // untracked state (case histories, state/) must never fail the guard.
+  // RUNBOOK.md is excluded too: it legitimately documents the removal
+  // (`rm -f /opt/pizza-eagle/.env`) and the post-flight verification steps
+  // (`sudo test ! -e /opt/pizza-eagle/.env`) — these are instructions that
+  // the old file must be gone, not references to a live file.
   const tracked = execFileSync("git", ["ls-files"], { cwd: repoRoot, encoding: "utf8" })
     .split("\n")
     .map((s) => s.trim())
     .filter(Boolean)
-    .filter((f) => !f.startsWith("tests/")); // this file documents the path
+    .filter((f) => !f.startsWith("tests/")) // this file documents the path
+    .filter((f) => f !== "RUNBOOK.md"); // documents the removal + verification
   assert.ok(tracked.length > 0, "git ls-files found nothing — wrong cwd?");
   const hits = tracked.filter((f) => {
     try {
@@ -136,8 +141,9 @@ test("repo: nothing outside tests/ references the dead /opt/pizza-eagle/.env", (
   assert.deepEqual(
     hits,
     [],
-    `dead env path ${DEAD} must not appear in tracked files outside tests/ ` +
-      "(removed from the box 2026-10-25)",
+    `dead env path ${DEAD} must not appear in tracked files outside tests/ and ` +
+      "RUNBOOK.md (removed from the box 2026-10-25; the runbook documents the " +
+      "removal and its verification steps)",
   );
 });
 

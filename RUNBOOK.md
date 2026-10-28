@@ -86,14 +86,34 @@ import os; os.remove('/tmp/s.json')
 ```
 
 **Important**: `/etc/pizza-eagle/.env` is root-owned — a plain restart does
-NOT pick up a rotated secret. Re-fetch it as root first:
+NOT pick up a rotated secret. Re-fetch it as root first.
+
+⚠ **Do NOT write it with a shell redirection** (`sudo aws … > /etc/pizza-eagle/.env`):
+the `>` is performed by YOUR shell, which runs as a normal user — `/etc/pizza-eagle/`
+is root-owned, so the redirect fails with `Permission denied` (and in the edge
+case where the file exists with relaxed perms, it would end up owned by you,
+not `root:root`, breaking the service boundary). Wrap the whole pipeline in
+`sudo bash -c` so the fetch, redirect, chown, and chmod all run as root in one
+atomic step:
 
 ```bash
-sudo aws secretsmanager get-secret-value --secret-id ptp/prod/pizza-eagle/env \
-  --query SecretString --output text \
-  | jq -r 'to_entries | .[] | "\(.key)=\(.value)"' > /etc/pizza-eagle/.env
-sudo chmod 600 /etc/pizza-eagle/.env   # owner is already root
-sudo systemctl restart pizza-eagle
+sudo bash -c 'set -euo pipefail; aws secretsmanager get-secret-value \
+  --secret-id ptp/prod/pizza-eagle/env --query SecretString --output text \
+  | jq -r "to_entries | .[] | \"\\(.key)=\\(.value)\"" > /etc/pizza-eagle/.env; \
+  chown root:root /etc/pizza-eagle/.env; \
+  chmod 600 /etc/pizza-eagle/.env; \
+  rm -f /opt/pizza-eagle/.env; \
+  systemctl daemon-reload; \
+  systemctl restart pizza-eagle'
+```
+
+Verify it took:
+
+```bash
+ls -l /etc/pizza-eagle/.env                    # must be -rw------- root root
+sudo test ! -e /opt/pizza-eagle/.env && echo "old file gone"   # must NOT exist
+sudo -u pizza-eagle cat /etc/pizza-eagle/.env  # must fail: Permission denied
+systemctl is-active pizza-eagle                # must print: active
 ```
 
 ## 2026-10-27 red-team remediation — what changed, what still needs YOU
