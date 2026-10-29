@@ -362,6 +362,47 @@ test("runInvestigation: spawns the wrapper with the 3-arg contract, minimal env,
   assert.ok(hist.endsWith("---\n\n"), "entry closed with separator");
 });
 
+test("runInvestigation: relative workdir is resolved absolute before the spawn (2026-10-29 box failure)", async () => {
+  // On the box BOT_STATE_DIR is unset, so workdirFor() yields a REPO-RELATIVE
+  // path ("state/work/<ts>"). The spawn sets the wrapper's cwd to the workdir
+  // itself, so the wrapper's own `[[ -d "$WORKDIR" ]]` check resolved the
+  // relative argv against the wrong base and every investigation died with
+  // "workdir does not exist: state/work/…". runInvestigation must hand the
+  // wrapper an absolute path. Real wrapper, hermetic mode 3, mock pi.
+  const tmp = mkdtempSync(join(tmpdir(), "pe-relwd-"));
+  const mockPi = join(tmp, "mock-pi.sh");
+  writeFileSync(
+    mockPi,
+    ["#!/usr/bin/env bash", 'printf \'%s\\n\' "$@" > "$PWD/pi-argv.txt"', 'echo "OK"', ""].join("\n"),
+  );
+  chmodSync(mockPi, 0o755);
+
+  const prevCwd = process.cwd();
+  process.chdir(tmp); // listener cwd — the relative state root lives under it
+  try {
+    const relWorkdir = join("state", "work", "rel-1"); // no ".." — stays under cwd
+    const { answer } = await runInvestigation(
+      { ...cfg, invWrapper: WRAPPER, piBin: mockPi, agentDir: join(tmp, "no-agent-dir") },
+      { question: "q", sessionId: SESSION_ID, workdir: relWorkdir },
+    );
+    assert.equal(answer, "OK");
+    // The mock pi ran INSIDE the resolved absolute workdir (its cwd) — this
+    // file existing there is the proof; before the fix the run died at the
+    // wrapper's workdir check and pi-argv.txt was never written.
+    const argvFile = join(tmp, "state", "work", "rel-1", "pi-argv.txt");
+    assert.ok(existsSync(argvFile), "pi ran inside the resolved workdir");
+    const argv = readFileSync(argvFile, "utf8").split("\n").filter((s) => s !== "");
+    assert.equal(argv.at(-1), "q", "question is the last argv element after --");
+    assert.ok(argv.includes("--no-approve"), "project trust declined");
+    assert.ok(
+      existsSync(join(tmp, "state", "work", "rel-1", "case-history.md")),
+      "bookkeeping landed in the same resolved workdir",
+    );
+  } finally {
+    process.chdir(prevCwd);
+  }
+});
+
 test("runInvestigation: non-zero wrapper exit fails the run with the stderr tail", async () => {
   const tmp = mkdtempSync(join(tmpdir(), "pe-inv-"));
   const wrapper = join(tmp, "mock-wrapper.sh");
