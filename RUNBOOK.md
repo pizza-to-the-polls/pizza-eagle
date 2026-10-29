@@ -26,6 +26,34 @@ One page. If Scott's unavailable, this keeps the bird flying.
 | Database access | `ptp_ro` role (SELECT-only) via RDS Data API |
 | Backups | `s3://pizza-eagle-backups/` — nightly tar, 180-day lifecycle |
 | Usage ledger | `state/usage.jsonl` on the box — every question, mint, publish |
+| pi model catalog | `/home/pizza-eagle/.pi/agent/models.json` on the box (NOT in this repo) |
+
+## Model catalog (agent dir — re-provision by hand!)
+
+pi's `models.json` and `settings.json` live in the box agent dir
+(`/home/pizza-eagle/.pi/agent/`), **not in this repo** — a box rebuild will NOT
+restore capability fixes to them. Known-good state (fixed 2026-10-29):
+
+- Vision-capable models must declare `"input": ["text", "image"]`. These were
+  upstream-declared text-only and had to be corrected by hand — a rebuild
+  silently regresses them and vision runs (see `PI_MODEL` in `.env.example`)
+  fail or ignore attachments:
+  - `z-ai/glm-5v-turbo` (verified end-to-end with a test image)
+  - `qwen/qwen3-vl-235b-a22b-instruct` and `-thinking`
+  - `qwen/qwen3-vl-32b-instruct`
+  - `baidu/ernie-4.5-vl-424b-a47b`
+  - `google/gemini-3.5-flash` was already image-capable
+- Default thinking level moved high → medium.
+
+After any box rebuild or agent-dir re-provision, verify with:
+
+```bash
+ssh ptp-ops "grep -B2 -A8 'glm-5v-turbo' ~pizza-eagle/.pi/agent/models.json"
+# each VL entry's "input" array must contain "image"
+```
+
+`PI_MODEL` (listener env) selects a model per run via pi `--model` and must
+match an entry in that catalog — it only overrides, never adds models.
 
 ## How to restart it
 

@@ -33,6 +33,8 @@ export interface Config {
   invUser: string;
   /** pi agent config dir (~/.pi/agent) staged into the run by the wrapper */
   piAgentDir: string;
+  /** Per-run model override (--model <provider/id pattern>); unset = settings.json default */
+  piModel?: string;
   /** root for thread map, per-thread workdirs, pi session files */
   stateDir: string;
   /** operator context (AGENTS.md) copied into each workdir */
@@ -129,6 +131,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     invImage: e.INV_IMAGE ?? "pizza-eagle-investigation",
     invUser: e.INV_USER ?? "pizza-eagle-inv",
     piAgentDir: e.PI_AGENT_DIR ?? join(homedir(), ".pi", "agent"),
+    piModel: e.PI_MODEL || undefined,
     stateDir: e.BOT_STATE_DIR ?? "./state",
     // repo-relative default: agent/ inside this repo (works from repo root
     // locally and from WorkingDirectory=/opt/pizza-eagle on the box)

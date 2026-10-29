@@ -135,6 +135,10 @@ export function wrapperEnv(
   out.INV_USER = cfg.invUser;
   out.PI_BIN = cfg.piBin;
   out.PI_AGENT_DIR = cfg.piAgentDir;
+  // Per-run model override (issue #34): forwarded only when set, so an
+  // unset knob leaves pi's settings.json default untouched. The value
+  // rides in as PI_MODEL; the wrapper turns it into pi's `--model` flag.
+  if (cfg.piModel) out.PI_MODEL = cfg.piModel;
   return out;
 }
 
