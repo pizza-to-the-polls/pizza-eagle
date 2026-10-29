@@ -106,7 +106,13 @@ const WRAPPER_ENV_ALLOWLIST = [
   "TMPDIR",
   "LANG",
   "LC_ALL",
-  // pi's env-keyed model credential (or-pizza provider — see pi-config)
+  // pi's env-keyed model credential (or-pizza provider — see pi-config).
+  // BOTH names, whichever the environment provides: the box's pi-config
+  // secret + .env key the provider as OPENROUTER_KEY_EAGLE, while laptop/dev
+  // pi configs use OPENROUTER_KEY_PIZZA. Forwarding only one name silently
+  // starved pi of its key (2026-10-29 #dev: "No API key found for the
+  // selected model" from every box investigation after PR #27's allowlist).
+  "OPENROUTER_KEY_EAGLE",
   "OPENROUTER_KEY_PIZZA",
   // investigation data sources / helpers
   "GA_PROPERTY_ID", // ga.mjs default property

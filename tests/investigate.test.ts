@@ -252,7 +252,8 @@ test("wrapperEnv: explicit allowlist — Slack tokens are structurally absent", 
     SLACK_APP_TOKEN: cfg.slackAppToken,
     SLACK_BOT_TOKEN: cfg.slackBotToken,
     SLACK_TOKEN_ALIAS: cfg.slackBotToken, // same value under a friendlier name
-    OPENROUTER_KEY_PIZZA: "sk-or-xyz", // pi's model key — must pass
+    OPENROUTER_KEY_EAGLE: "sk-or-eagle", // pi's model key (box naming) — must pass
+    OPENROUTER_KEY_PIZZA: "sk-or-pizza", // pi's model key (dev naming) — must pass
     GA_PROPERTY_ID: "123456", // ga.mjs default property — must pass
     ZAPIER_MCP_URL: "https://mcp.example", // zapier harness MCP — must pass
   };
@@ -260,7 +261,8 @@ test("wrapperEnv: explicit allowlist — Slack tokens are structurally absent", 
   assert.equal(out.SLACK_APP_TOKEN, undefined, "app token absent");
   assert.equal(out.SLACK_BOT_TOKEN, undefined, "bot token absent");
   assert.equal(out.SLACK_TOKEN_ALIAS, undefined, "token alias absent (allowlist, not scrub)");
-  assert.equal(out.OPENROUTER_KEY_PIZZA, "sk-or-xyz", "model key passes");
+  assert.equal(out.OPENROUTER_KEY_EAGLE, "sk-or-eagle", "model key (EAGLE naming) passes");
+  assert.equal(out.OPENROUTER_KEY_PIZZA, "sk-or-pizza", "model key (PIZZA naming) passes");
   assert.equal(out.GA_PROPERTY_ID, "123456", "GA property passes");
   assert.equal(out.ZAPIER_MCP_URL, "https://mcp.example", "zapier MCP endpoint passes");
   assert.equal(out.PATH, "/usr/bin:/bin");
@@ -277,8 +279,9 @@ test("wrapperEnv: wrapper knobs ride as explicit env from cfg", () => {
 });
 
 test("wrapperEnv: empty-string allowlist values are dropped, not forwarded as blanks", () => {
-  const out = wrapperEnv(cfg, { PATH: "/bin", OPENROUTER_KEY_PIZZA: "" });
+  const out = wrapperEnv(cfg, { PATH: "/bin", OPENROUTER_KEY_PIZZA: "", OPENROUTER_KEY_EAGLE: "" });
   assert.equal(out.OPENROUTER_KEY_PIZZA, undefined, "blank value not forwarded");
+  assert.equal(out.OPENROUTER_KEY_EAGLE, undefined, "blank value not forwarded");
   assert.equal(out.PATH, "/bin");
 });
 
@@ -315,6 +318,7 @@ test("runInvestigation: spawns the wrapper with the 3-arg contract, minimal env,
       '  echo "SLACK_APP_TOKEN=${SLACK_APP_TOKEN+x}"',
       '  echo "SLACK_BOT_TOKEN=${SLACK_BOT_TOKEN+x}"',
       '  echo "OPENROUTER_KEY_PIZZA=${OPENROUTER_KEY_PIZZA:-}"',
+      '  echo "OPENROUTER_KEY_EAGLE=${OPENROUTER_KEY_EAGLE:-}"',
       '} > "$WORKDIR/wrapper-capture.txt"',
       'echo "mock answer"',
       "",
