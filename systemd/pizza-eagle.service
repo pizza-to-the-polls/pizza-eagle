@@ -54,8 +54,12 @@ SystemCallArchitectures=native
 # /var/lib/pizza-eagle-inv: rootless podman's image store for the
 # investigation user — the wrapper (child of this service) runs podman as
 # pizza-eagle-inv, and ProtectSystem=strict would otherwise make that
-# path read-only.
-ReadWritePaths=/opt/pizza-eagle/state /home/pizza-eagle /var/log/pizza-eagle /var/lib/pizza-eagle-inv
+# path read-only. The "-" prefix is load-bearing: the dir only materializes
+# once the inv-user bootstrap lands (issue #30), and a ReadWritePaths entry
+# that doesn't exist makes systemd fail the whole service at NAMESPACE
+# setup (status=226) — the bot could not start AT ALL (2026-10-29 outage,
+# ~05:04–05:05Z). install-units.sh also mkdir -p's it on every update.
+ReadWritePaths=/opt/pizza-eagle/state /home/pizza-eagle /var/log/pizza-eagle -/var/lib/pizza-eagle-inv
 ProtectHome=read-only
 [Install]
 WantedBy=multi-user.target

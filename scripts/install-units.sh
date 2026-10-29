@@ -33,6 +33,14 @@ REPO_DIR="/opt/pizza-eagle"
 UNIT_DIR="/etc/systemd/system"
 CHANGED=0
 
+# pizza-eagle.service's ReadWritePaths references /var/lib/pizza-eagle-inv
+# (rootless podman store for the future investigation user, issue #30).
+# Materialize it on every update: a ReadWritePaths path that doesn't exist
+# makes systemd fail the service at NAMESPACE setup (status=226 — the bot
+# can't start at all; 2026-10-29 outage). Ownership/permissions stay with
+# bootstrap once the inv user exists — mkdir -p preserves whatever is there.
+mkdir -p /var/lib/pizza-eagle-inv
+
 for unit in "$REPO_DIR"/systemd/*.service "$REPO_DIR"/systemd/*.timer; do
   # Unmatched glob (no .timer in systemd/, say) stays literal — skip it.
   [ -f "$unit" ] || continue
