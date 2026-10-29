@@ -117,6 +117,7 @@ const WRAPPER_ENV_ALLOWLIST = [
   // investigation data sources / helpers
   "GA_PROPERTY_ID", // ga.mjs default property
   "ZAPIER_MCP_URL", // zapier harness MCP endpoint
+  "GH_APP_ID", // gh-token.mjs — the listener injects it from .env (its header)
 ];
 
 export function wrapperEnv(

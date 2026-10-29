@@ -353,6 +353,29 @@ test("deploy.yml: update-agent SSM list starts with the dirty-tree guard, then t
 const INSTALL_UNITS = "/opt/pizza-eagle/scripts/install-units.sh";
 const INSTALL_SKILLS = "/opt/pizza-eagle/scripts/install-skills.sh";
 
+test("units: pizza-eagle.service ReadWritePaths tolerates the unbuilt inv store (never 226/NAMESPACE)", () => {
+  // 2026-10-29 outage: /var/lib/pizza-eagle-inv (rootless podman store for
+  // the investigation user, issue #30) didn't exist, and a ReadWritePaths
+  // entry that doesn't exist makes systemd fail the whole service at
+  // NAMESPACE setup (status=226) — the bot could not start AT ALL.
+  const svc = readUnit("pizza-eagle.service");
+  const rw = svc.find((l) => /^\s*ReadWritePaths\s*=/.test(l));
+  assert.ok(rw, "pizza-eagle.service has ReadWritePaths");
+  assert.ok(
+    rw!.split(/\s+/).includes("-/var/lib/pizza-eagle-inv"),
+    "the inv store rides with the '-' prefix (ignore-if-missing) until bootstrap creates it",
+  );
+});
+
+test("scripts: install-units.sh materializes /var/lib/pizza-eagle-inv before any restart", () => {
+  // Both update paths (nightly ExecStartPost + SSM dispatch) run this script
+  // before the bot restart — the mkdir guarantees the strict ReadWritePaths
+  // entry always has a target, and mkdir -p preserves bootstrap's ownership
+  // once the inv user exists.
+  const body = readScript("scripts/install-units.sh");
+  assert.match(body, /mkdir -p \/var\/lib\/pizza-eagle-inv/, "must mkdir -p the inv store");
+});
+
 function readScript(rel: string): string {
   return readFileSync(join(repoRoot, rel), "utf8");
 }

@@ -256,6 +256,7 @@ test("wrapperEnv: explicit allowlist — Slack tokens are structurally absent", 
     OPENROUTER_KEY_PIZZA: "sk-or-pizza", // pi's model key (dev naming) — must pass
     GA_PROPERTY_ID: "123456", // ga.mjs default property — must pass
     ZAPIER_MCP_URL: "https://mcp.example", // zapier harness MCP — must pass
+    GH_APP_ID: "123456", // gh-token.mjs — must pass
   };
   const out = wrapperEnv(cfg, env);
   assert.equal(out.SLACK_APP_TOKEN, undefined, "app token absent");
@@ -263,6 +264,7 @@ test("wrapperEnv: explicit allowlist — Slack tokens are structurally absent", 
   assert.equal(out.SLACK_TOKEN_ALIAS, undefined, "token alias absent (allowlist, not scrub)");
   assert.equal(out.OPENROUTER_KEY_EAGLE, "sk-or-eagle", "model key (EAGLE naming) passes");
   assert.equal(out.OPENROUTER_KEY_PIZZA, "sk-or-pizza", "model key (PIZZA naming) passes");
+  assert.equal(out.GH_APP_ID, "123456", "GH app id passes (gh-token.mjs)");
   assert.equal(out.GA_PROPERTY_ID, "123456", "GA property passes");
   assert.equal(out.ZAPIER_MCP_URL, "https://mcp.example", "zapier MCP endpoint passes");
   assert.equal(out.PATH, "/usr/bin:/bin");
