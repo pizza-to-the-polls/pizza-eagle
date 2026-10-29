@@ -46,7 +46,9 @@
 # listener's memory.
 #
 # ENV CONTRACT (set by investigate.ts's wrapperEnv allowlist): PATH, HOME,
-# TMPDIR, LANG, OPENROUTER_KEY_PIZZA, PI_BIN, INV_IMAGE, INV_USER,
+# TMPDIR, LANG, OPENROUTER_KEY_EAGLE / OPENROUTER_KEY_PIZZA (whichever
+# pi's models.json keys the provider on — box: EAGLE, laptop/dev: PIZZA),
+# PI_BIN, INV_IMAGE, INV_USER,
 # PI_AGENT_DIR, AWS_REGION/AWS_DEFAULT_REGION, GA_PROPERTY_ID,
 # ZAPIER_MCP_URL. Slack tokens are structurally absent — investigate.ts
 # never passes them, and this script forwards only the list above.
@@ -112,7 +114,7 @@ can_drop() {
 
 # Env the isolated child gets. Enumerated explicitly (not inherited) so the
 # listener's full env can never ride along, whatever invokes this script.
-PASSTHROUGH_ENV=(OPENROUTER_KEY_PIZZA GA_PROPERTY_ID ZAPIER_MCP_URL)
+PASSTHROUGH_ENV=(OPENROUTER_KEY_EAGLE OPENROUTER_KEY_PIZZA GA_PROPERTY_ID ZAPIER_MCP_URL)
 build_drop_env() {  # prints env(1) arguments: HOME, PATH, passthrough
   printf 'HOME=%s\n' "$INV_HOME"
   printf 'PATH=%s\n' "${PATH:-/usr/local/bin:/usr/bin:/bin}"
@@ -218,6 +220,7 @@ if command -v podman >/dev/null 2>&1 && can_drop && image_available; then
     -v "$STAGE/home":/home/pi
     -e HOME=/home/pi
     -e PI_CODING_AGENT_DIR=/home/pi/.pi/agent
+    -e OPENROUTER_KEY_EAGLE
     -e OPENROUTER_KEY_PIZZA
     -e GA_PROPERTY_ID
     -e ZAPIER_MCP_URL
