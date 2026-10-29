@@ -66,9 +66,13 @@ function writeMockPi(dir: string): string {
 }
 
 function runWrapper(args: string[], env: Record<string, string> = {}) {
+  // Hermetic: ambient PI_MODEL (e.g. exported for manual vision testing per
+  // issue #34) must not leak into these argv-contract assertions — a test that
+  // wants it set passes it explicitly via `env`.
+  const { PI_MODEL: _stripped, ...inherited } = process.env;
   return spawnSync("bash", [WRAPPER, ...args], {
     cwd: repoRoot,
-    env: { ...process.env, INV_USER: NONEXISTENT_INV_USER, ...env },
+    env: { ...inherited, INV_USER: NONEXISTENT_INV_USER, ...env },
     encoding: "utf8",
   });
 }
@@ -207,6 +211,30 @@ test("wrapper: session routing and --no-approve precede the separator; sessions 
   ]);
 });
 
+test("wrapper: --model rides before the separator when PI_MODEL is set, absent when unset (issue #34)", () => {
+  // Per-run model override: the wrapper turns PI_MODEL into pi's `--model`
+  // flag. It must land BEFORE the `--` separator (it's a pi option, not a
+  // positional) and carry the value verbatim.
+  const setDir = mkdtempSync(join(tmpdir(), "pe-wrap-"));
+  const setPi = writeMockPi(setDir);
+  const model = "or-pizza/z-ai/glm-5v-turbo";
+  const set = runWrapper([setDir, SESSION_ID, "q"], { PI_BIN: setPi, PI_MODEL: model });
+  assert.equal(set.status, 0, `wrapper failed: ${set.stderr}`);
+  const setArgs = argvOf(setDir);
+  const modelIdx = setArgs.indexOf("--model");
+  assert.ok(modelIdx > 0, "--model flag present when PI_MODEL is set");
+  assert.equal(setArgs[modelIdx + 1], model, "model pattern follows --model verbatim");
+  const setSep = setArgs.indexOf("--");
+  assert.ok(modelIdx < setSep, "--model precedes the -- separator");
+
+  // Unset: the settings.json default stands — no --model anywhere.
+  const unsetDir = mkdtempSync(join(tmpdir(), "pe-wrap-"));
+  const unsetPi = writeMockPi(unsetDir);
+  const unset = runWrapper([unsetDir, SESSION_ID, "q"], { PI_BIN: unsetPi, PI_MODEL: "" });
+  assert.equal(unset.status, 0, `wrapper failed: ${unset.stderr}`);
+  assert.ok(!argvOf(unsetDir).includes("--model"), "empty/unset PI_MODEL adds no --model flag");
+});
+
 test("wrapper: --no-approve declines pi project trust (no --approve anywhere)", () => {
   // A planted .pi/extensions/*.ts in the pi-writable workdir executes on
   // the next `--approve` run (verified on pi 1.4.0). The bot never needs
@@ -257,6 +285,7 @@ test("wrapperEnv: explicit allowlist — Slack tokens are structurally absent", 
     GA_PROPERTY_ID: "123456", // ga.mjs default property — must pass
     ZAPIER_MCP_URL: "https://mcp.example", // zapier harness MCP — must pass
     GH_APP_ID: "123456", // gh-token.mjs — must pass
+    PI_MODEL: "or-pizza/env-direct", // issue #34: NOT an allowlist key — rides only via cfg.piModel
   };
   const out = wrapperEnv(cfg, env);
   assert.equal(out.SLACK_APP_TOKEN, undefined, "app token absent");
@@ -267,6 +296,7 @@ test("wrapperEnv: explicit allowlist — Slack tokens are structurally absent", 
   assert.equal(out.GH_APP_ID, "123456", "GH app id passes (gh-token.mjs)");
   assert.equal(out.GA_PROPERTY_ID, "123456", "GA property passes");
   assert.equal(out.ZAPIER_MCP_URL, "https://mcp.example", "zapier MCP endpoint passes");
+  assert.equal(out.PI_MODEL, undefined, "PI_MODEL never rides the raw env — cfg.piModel is its only source (issue #34)");
   assert.equal(out.PATH, "/usr/bin:/bin");
   assert.equal(out.HOME, "/home/pizza-eagle");
 });
@@ -278,6 +308,16 @@ test("wrapperEnv: wrapper knobs ride as explicit env from cfg", () => {
   assert.equal(out.INV_USER, cfg.invUser);
   assert.equal(out.PI_BIN, cfg.piBin);
   assert.equal(out.PI_AGENT_DIR, cfg.piAgentDir);
+});
+
+test("wrapperEnv: PI_MODEL forwarded from cfg.piModel, absent when unset (issue #34)", () => {
+  // Forwarded only when set — an unset knob keeps pi's settings.json default,
+  // and absence is by construction (allowlist philosophy), not a scrub.
+  const withModel = wrapperEnv({ ...cfg, piModel: "or-pizza/qwen3-vl-32b-instruct" }, {});
+  assert.equal(withModel.PI_MODEL, "or-pizza/qwen3-vl-32b-instruct", "cfg.piModel rides as PI_MODEL");
+
+  const withoutModel = wrapperEnv(cfg, {});
+  assert.equal(withoutModel.PI_MODEL, undefined, "no PI_MODEL key when cfg.piModel is unset");
 });
 
 test("wrapperEnv: empty-string allowlist values are dropped, not forwarded as blanks", () => {

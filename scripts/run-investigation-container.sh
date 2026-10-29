@@ -49,9 +49,11 @@
 # TMPDIR, LANG, OPENROUTER_KEY_EAGLE / OPENROUTER_KEY_PIZZA (whichever
 # pi's models.json keys the provider on — box: EAGLE, laptop/dev: PIZZA),
 # GH_APP_ID (gh-token.mjs), PI_BIN, INV_IMAGE, INV_USER,
-# PI_AGENT_DIR, AWS_REGION/AWS_DEFAULT_REGION, GA_PROPERTY_ID,
-# ZAPIER_MCP_URL. Slack tokens are structurally absent — investigate.ts
-# never passes them, and this script forwards only the list above.
+# PI_AGENT_DIR, PI_MODEL (per-run model override — issue #34; absent
+# when unset, which keeps the staged settings.json default),
+# AWS_REGION/AWS_DEFAULT_REGION, GA_PROPERTY_ID, ZAPIER_MCP_URL.
+# Slack tokens are structurally absent — investigate.ts never passes
+# them, and this script forwards only the list above.
 #
 # SUDOERS (bootstrap.sh installs /etc/sudoers.d/pizza-eagle-investigation):
 #   pizza-eagle ALL=(pizza-eagle-inv) NOPASSWD: ALL
@@ -96,8 +98,13 @@ PI_ARGS=(
   --session-id "$SESSION_ID"
   --session-dir "$WORKDIR/sessions"
   --no-approve   # decline project trust — see src/investigate.ts header note
-  -- "$QUESTION"
 )
+# Per-run model override (issue #34): the operator selects a vision model
+# (e.g. PI_MODEL=or-pizza/z-ai/glm-5v-turbo in the listener's env). Must
+# ride BEFORE the `--` separator — it's a pi option, not a positional —
+# and the model must exist in the staged catalog. Unset = default.
+[[ -n "${PI_MODEL:-}" ]] && PI_ARGS+=(--model "$PI_MODEL")
+PI_ARGS+=(-- "$QUESTION")
 
 # ── Privilege drop helpers ─────────────────────────────────────────────────
 # Rootless podman keeps its image store under the invoking user's home, so
@@ -114,7 +121,7 @@ can_drop() {
 
 # Env the isolated child gets. Enumerated explicitly (not inherited) so the
 # listener's full env can never ride along, whatever invokes this script.
-PASSTHROUGH_ENV=(OPENROUTER_KEY_EAGLE OPENROUTER_KEY_PIZZA GH_APP_ID GA_PROPERTY_ID ZAPIER_MCP_URL)
+PASSTHROUGH_ENV=(OPENROUTER_KEY_EAGLE OPENROUTER_KEY_PIZZA GH_APP_ID GA_PROPERTY_ID ZAPIER_MCP_URL PI_MODEL)
 build_drop_env() {  # prints env(1) arguments: HOME, PATH, passthrough
   printf 'HOME=%s\n' "$INV_HOME"
   printf 'PATH=%s\n' "${PATH:-/usr/local/bin:/usr/bin:/bin}"
@@ -225,6 +232,7 @@ if command -v podman >/dev/null 2>&1 && can_drop && image_available; then
     -e GH_APP_ID
     -e GA_PROPERTY_ID
     -e ZAPIER_MCP_URL
+    -e PI_MODEL
     -e AWS_REGION -e AWS_DEFAULT_REGION
     -v "$SCRIPTS_DIR":/opt/pizza-eagle/scripts:ro
   )

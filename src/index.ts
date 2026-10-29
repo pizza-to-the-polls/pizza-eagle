@@ -8,7 +8,7 @@
 
 import { SocketModeClient } from "@slack/socket-mode";
 import { WebClient } from "@slack/web-api";
-import { mkdirSync, writeFileSync } from "node:fs";  // mkdir: thread-context writes precede runInvestigation's own mkdir
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";  // mkdir: thread-context writes precede runInvestigation's own mkdir
 import { execFile } from "node:child_process";
 import { join } from "node:path";
 import { appendUsage, withinDailyCap } from "./usage.js";
@@ -23,6 +23,7 @@ import { ThreadStore, workdirFor, type ThreadRecord } from "./store.js";
 import Bugsnag from "@bugsnag/js";
 import { editStatus, fetchThreadContext, postFindings, postStatus, react, stripMention } from "./slack.js";
 import { InvestigationError, runInvestigation, activeInvestigations } from "./investigate.js";
+import { downloadAttachments, type SlackFile } from "./attachments.js";
 import { RunQueue, QueueFullError } from "./queue.js";
 
 interface MentionEvent {
@@ -32,6 +33,10 @@ interface MentionEvent {
   thread_ts?: string;
   ts: string;
   bot_id?: string;
+  /** Slack message attachments (images, PDFs, …). Downloaded into the case
+   * workdir and referenced as @file <name> so vision-capable runs can see
+   * them (issue #34). */
+  files?: SlackFile[];
 }
 
 /** Minimal FIFO with concurrency cap — jobs are async, acks are instant. → moved to src/queue.ts (2026-10-27) */
@@ -98,8 +103,11 @@ async function main(): Promise<void> {
   });
 
   async function handle(event: MentionEvent): Promise<void> {
+    // A mention with only an attachment (no text) is still a run: the
+    // download below turns it into an @file-only prompt.
     const question = stripMention(event.text);
-    if (!question) return;
+    const hasFiles = Boolean(event.files?.length);
+    if (!question && !hasFiles) return;
 
     // Allowlists: channels (if configured) and users (if configured).
     if (cfg.allowedChannels.size && !cfg.allowedChannels.has(event.channel)) {
@@ -194,6 +202,12 @@ async function main(): Promise<void> {
       // (success or failure) — a visible "in progress" marker next to the
       // message itself, independent of the status reply below.
       await react(slack, event.channel, threadTs, "pizza-eagle-working", true);
+      // Attachment downloads (issue #34) are per-run scratch: downloaded into
+      // the case workdir before the run, deleted in the finally below so they
+      // never outlive it — success, failure, or early death. (The nightly
+      // backup tar also excludes `attachment-*`, so even a mid-run backup
+      // never ships one to S3.)
+      const attachmentPaths: string[] = [];
       try {
         if (threadContext) {
           // refresh on every run so follow-ups see the newest replies.
@@ -204,8 +218,18 @@ async function main(): Promise<void> {
           mkdirSync(record.workdir, { recursive: true });
           writeFileSync(join(record.workdir, "thread-context.md"), threadContext + "\n");
         }
+        // Vision runs (issue #34): download Slack files into the case workdir
+        // and reference them as @file … in the question. Best-effort — a
+        // failed download skips the file and the run proceeds text-only.
+        let runQuestion = question;
+        if (event.files?.length) {
+          const dl = await downloadAttachments(cfg, record.workdir, event.files);
+          attachmentPaths.push(...dl.paths);
+          const runQ = [dl.args.join(" "), question].filter(Boolean).join(" ");
+          if (runQ) runQuestion = runQ;
+        }
         const { answer } = await runInvestigation(cfg, {
-          question,
+          question: runQuestion,
           sessionId: record.sessionId,
           workdir: record.workdir,
           requester: event.user,
@@ -241,6 +265,16 @@ async function main(): Promise<void> {
       } finally {
         // :pizza-eagle-working: off when done — success OR failure
         await react(slack, event.channel, threadTs, "pizza-eagle-working", false);
+        // Per-run attachment scratch (issue #34): delete the downloads so
+        // they never outlive the run. Best-effort; the backup tar's
+        // `attachment-*` exclude is the backstop for mid-run crashes.
+        for (const p of attachmentPaths) {
+          try {
+            rmSync(p, { force: true });
+          } catch {
+            /* best-effort */
+          }
+        }
       }
     }).catch((e: unknown) => {
       // The job body never rejects (own try/catch) — a rejection here means

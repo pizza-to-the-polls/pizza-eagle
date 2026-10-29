@@ -98,3 +98,15 @@ test("loadConfig: investigation isolation keys are env-overridable", () => {
   assert.equal(cfg.invUser, "custom-inv");
   assert.equal(cfg.piAgentDir, "/custom/agent");
 });
+
+test("loadConfig: PI_MODEL maps to piModel; unset or blank keeps the settings.json default (issue #34)", () => {
+  const withModel = loadConfig({ ...validEnv, PI_MODEL: "or-pizza/z-ai/glm-5v-turbo" } as NodeJS.ProcessEnv);
+  assert.equal(withModel.piModel, "or-pizza/z-ai/glm-5v-turbo", "PI_MODEL read into cfg.piModel");
+
+  // Blank (like an empty .env line) is treated as unset — no `--model ""` runs.
+  const blank = loadConfig({ ...validEnv, PI_MODEL: "" } as NodeJS.ProcessEnv);
+  assert.equal(blank.piModel, undefined, "blank PI_MODEL is undefined, not an empty string");
+
+  const unset = loadConfig(validEnv);
+  assert.equal(unset.piModel, undefined, "no PI_MODEL key when unset");
+});
