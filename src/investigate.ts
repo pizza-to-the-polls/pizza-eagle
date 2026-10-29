@@ -27,7 +27,7 @@
 
 import { spawn } from "node:child_process";
 import { appendFileSync, chmodSync, copyFileSync, mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { Config } from "./config.js";
 
 export interface InvestigationResult {
@@ -137,24 +137,33 @@ export async function runInvestigation(
 ): Promise<InvestigationResult> {
   validateRunInputs(opts);
 
-  mkdirSync(opts.workdir, { recursive: true });
+  // Absolute by construction. workdirFor() builds the case workdir from
+  // cfg.stateDir, which defaults to "./state" (BOT_STATE_DIR unset — the
+  // box). The wrapper resolves its <workdir> argv against ITS OWN cwd —
+  // which the spawn below sets to the workdir itself — so a relative
+  // workdir would fail the wrapper's -d check as
+  // "workdir does not exist: state/work/…" (2026-10-29 #dev, two failed
+  // investigations on the box after PR #27). Resolve once, use everywhere.
+  const workdir = resolve(opts.workdir);
+
+  mkdirSync(workdir, { recursive: true });
   // The case workdir is the exchange surface with the isolated
   // investigation user (member of group pizza-eagle — bootstrap.sh):
   // owner + group get rwx, world gets nothing. pi writes its session files
   // under <workdir>/sessions from inside the boundary.
-  chmodSync(opts.workdir, 0o770);
+  chmodSync(workdir, 0o770);
 
   // Listener-owned per-run authorization record (see writeRequestAuth):
   // written BEFORE the run so the operator prompt and the helper scripts
   // gate on Slack-authenticated identity, never on question text.
-  writeRequestAuth(opts.workdir, {
+  writeRequestAuth(workdir, {
     requester: opts.requester,
     writeAllowed: opts.writeAllowed,
   });
 
   // Operator context rides along into every run (idempotent).
   try {
-    copyFileSync(join(cfg.agentDir, "AGENTS.md"), join(opts.workdir, "AGENTS.md"));
+    copyFileSync(join(cfg.agentDir, "AGENTS.md"), join(workdir, "AGENTS.md"));
   } catch {
     console.warn(`[pizza-eagle] no AGENTS.md in AGENT_DIR (${cfg.agentDir}) — running bare`);
   }
@@ -164,15 +173,15 @@ export async function runInvestigation(
   // even on a thread's FIRST question. (2026-10-25 #dev thread: a publish
   // request rode Q1 and the gate found no entry — entries were previously
   // appended only after each run.) Best-effort: never fail a run over it.
-  tryHistory(() => openHistory(opts.workdir, opts.question, opts.requester));
+  tryHistory(() => openHistory(workdir, opts.question, opts.requester));
 
   const started = Date.now();
   // The wrapper owns everything below this point: privilege drop, staging
   // (pi config + triage creds from the listener user's HOME), container
   // lifecycle, and pi's argv (including the `--` question separator). It
   // gets a THREE-argument argv and an allowlisted env — nothing else.
-  const child = spawn(cfg.invWrapper, [opts.workdir, opts.sessionId, opts.question], {
-    cwd: opts.workdir,
+  const child = spawn(cfg.invWrapper, [workdir, opts.sessionId, opts.question], {
+    cwd: workdir,
     env: wrapperEnv(cfg),
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -206,14 +215,14 @@ export async function runInvestigation(
   const answer = stdout.trim();
 
   if (timedOut) {
-    tryHistory(() => closeHistory(opts.workdir, "(timed out)"));
+    tryHistory(() => closeHistory(workdir, "(timed out)"));
     throw new InvestigationError(
       `Investigation exceeded ${Math.round(cfg.timeoutMs / 60_000)} minutes and was stopped.`,
       stderr,
     );
   }
   if (code !== 0 || !answer) {
-    tryHistory(() => closeHistory(opts.workdir, answer || "(no output)"));
+    tryHistory(() => closeHistory(workdir, answer || "(no output)"));
     const tail = stderr.trim().slice(-800);
     throw new InvestigationError(
       `pi exited with code ${code ?? "?"}${signal ? ` (${signal})` : ""}.`,
@@ -221,7 +230,7 @@ export async function runInvestigation(
     );
   }
 
-  tryHistory(() => closeHistory(opts.workdir, answer));
+  tryHistory(() => closeHistory(workdir, answer));
   return { answer, durationMs };
 }
 
