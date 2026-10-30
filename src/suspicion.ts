@@ -85,8 +85,17 @@ export function evaluateSuspicion(
   opts: { capRefusal?: boolean; burstWindowMs?: number; burstMax?: number } = {},
 ): Suspicion | null {
   const reasons: string[] = [];
+  // Trusted operators aren't policed by the rate-limit rules: they run
+  // long bursts during incidents and probe the bot's limits on purpose
+  // (2026-10-29: the detector flagged Scott's own 6-questions-in-10-min
+  // incident triage as "suspicious"). Content rules (PII, secrets) still
+  // apply to everyone — a gated account asking for donor dumps is either
+  // a compromise or genuinely suspicious, and worth the operator ping.
+  // The usage ledger still records every question either way.
+  const gated = WRITE_GATE.includes(requester);
 
   if (opts.capRefusal) {
+    if (gated) return null;
     return { rule: "cap", reasons: ["hit the daily question cap"], alert: true };
   }
 
@@ -107,6 +116,8 @@ export function evaluateSuspicion(
     const prior = priorFlags(stateDir, "write-attempt", requester, 24 * 3600_000);
     return { rule: "write-attempt", reasons, alert: prior >= 1 };
   }
+
+  if (gated) return null; // burst: rate-limit policing is for non-operators
 
   // burst: many questions in a short window (ledger question events)
   const windowMs = opts.burstWindowMs ?? 10 * 60_000;

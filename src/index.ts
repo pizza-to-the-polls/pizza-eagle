@@ -143,7 +143,12 @@ async function main(): Promise<void> {
 
     // Usage ledger + anti-abuse guardrail: one line per question (audit
     // trail), and a polite in-thread refusal past the daily per-user cap.
-    const cap = withinDailyCap(cfg.stateDir, event.user);
+    // WRITE_GATE operators are exempt from the cap (they run the bot —
+    // incident triage legitimately blows past 25/day; 2026-10-29 the
+    // cap+burst flags policed Scott's own triage). See suspicion.ts.
+    const cap = WRITE_GATE.includes(event.user)
+      ? { ok: true, used: 0, cap: Number.POSITIVE_INFINITY }
+      : withinDailyCap(cfg.stateDir, event.user);
     if (!cap.ok) {
       await postStatus(
         slack,

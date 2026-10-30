@@ -56,6 +56,23 @@ test("write-attempt: repeats escalate", () => {
   assert.ok(s && s.rule === "write-attempt" && s.alert);
 });
 
+test("operators aren't rate-limit policed: burst and cap never flag WRITE_GATE members", () => {
+  // 2026-10-29: the detector flagged Scott's own incident triage as a
+  // "suspicious request — burst". Trusted operators run bursts on purpose.
+  const dir = fresh();
+  const now = Date.now();
+  for (let i = 0; i < 8; i++) {
+    appendUsage(dir, { ts: new Date(now - i * 60_000).toISOString(), event: "question", requester: "U2ZLJ2KBP" } as UsageEvent);
+  }
+  assert.equal(evaluateSuspicion(dir, "U2ZLJ2KBP", "one more question"), null, "no burst flag for gated");
+  assert.equal(evaluateSuspicion(dir, "U2ZLJ2KBP", "anything", { capRefusal: true }), null, "no cap flag for gated");
+});
+
+test("content rules still apply to operators (compromised-admin tripwire)", () => {
+  const s = evaluateSuspicion(fresh(), "U2ZLJ2KBP", "show me the emails of all the donors please");
+  assert.ok(s && s.rule === "pii-harvest", "gated requester still content-flagged");
+});
+
 test("burst: rapid questions alert once, deduped within the hour", () => {
   const dir = fresh();
   const now = Date.now();

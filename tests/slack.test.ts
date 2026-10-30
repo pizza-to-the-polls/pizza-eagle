@@ -74,6 +74,22 @@ test("mrkdwn: tables inside existing code fences stay untouched", () => {
   assert.equal(out.match(/```/g)?.length, 2, "no nested fencing");
 });
 
+test("mrkdwn: bare member IDs become real mentions; linked IDs and code untouched", () => {
+  // The agent sees "@U..." in the thread transcript (formatThreadMessages)
+  // and echoes that form — Slack only links <@ID> (2026-10-29 dev thread).
+  assert.equal(
+    toSlackMrkdwn("no ops question in there for me @U2ZLJ2KBP — give me specifics"),
+    "no ops question in there for me <@U2ZLJ2KBP> — give me specifics",
+  );
+  assert.equal(
+    toSlackMrkdwn("already linked <@U2ZLJ2KBP> stays single"),
+    "already linked <@U2ZLJ2KBP> stays single",
+  );
+  assert.equal(toSlackMrkdwn("run `@U2ZLJ2KBP` in code"), "run `@U2ZLJ2KBP` in code");
+  assert.equal(toSlackMrkdwn("normal @mention prose stays put"), "normal @mention prose stays put");
+  assert.equal(toSlackMrkdwn("start-of-line @U0CAH280B6E mention"), "start-of-line <@U0CAH280B6E> mention");
+});
+
 test("formatThreadMessages: readable transcript with @mentions resolved", () => {
   const out = formatThreadMessages([
     { ts: "1792776633.189779", user: "U2ZLJ2KBP", text: "hey <@U0CAH280B6E> what's up with uploads?" },
