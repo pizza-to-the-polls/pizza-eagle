@@ -52,6 +52,9 @@ send, and stop. Reads with the key are fine any time, but prefer read-only SQL
 | `GET /banned-phone-numbers/:idOrPhoneNumber` | One ban (by id or phone) |
 | `POST /banned-phone-numbers` | **Ban** a phone number (see `block-people` skill) |
 | `DELETE /banned-phone-numbers/:id` | **Unban** (by id — look it up first) |
+| `GET /blocked-ips` | List IP blocks (`?limit=100&page=N`) — rows store SHA-256 **hashes** only, never raw IPs |
+| `POST /blocked-ips` | **Block** a submission IP — body `{ ip, reason, blockedBy }`; the server normalizes+hashes it. Blocked IPs get `403` at the `POST /report` / `POST /upload` edge (see `block-people` skill) |
+| `DELETE /blocked-ips/:id` | **Unblock** (by id — look it up first; lookup by hash) |
 | `GET /reports/:idOrAddress/media` | Moderation-queue media view for a report |
 | `PUT /locations/:idOrAddress/validate` / `skip` / `truck` / `order` | Location admin actions — same write gate applies |
 | `GET /totals`, `GET /locations`, `GET /reports` | Public reads, no key needed |
