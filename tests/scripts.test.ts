@@ -9,6 +9,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { appJwt, b64url as ghB64, readRequestAuth } from "../scripts/gh-token.mjs";
 import { b64url as gaB64, dimensionFilter, parseArgs, resolveDate } from "../scripts/ga.mjs";
+import { errorCodeMeaning, normalizeNumber, sinceDaysAgo } from "../scripts/twilio-lookup.mjs";
 
 test("ga + gh b64url: URL-safe, no padding, -/_ alphabet", () => {
   for (const b64 of [gaB64, ghB64]) {
@@ -218,6 +219,32 @@ test("gh-token readRequestAuth: absent/unreadable file ⇒ null", () => {
  *   4. Box-side skill absent from the repo → untouched (never deleted).
  *   5. Repo subdirectory without SKILL.md → silently skipped.
  */
+test("twilio-lookup normalizeNumber: E164 passthrough, US completion, junk rejected", () => {
+  assert.equal(normalizeNumber("+15038938626"), "+15038938626");
+  assert.equal(normalizeNumber("503-893-8626"), "+15038938626");
+  assert.equal(normalizeNumber("1 503 893 8626"), "+15038938626");
+  assert.equal(normalizeNumber("5038938626"), "+15038938626");
+  assert.equal(normalizeNumber("12345"), null, "too short must be rejected, not guessed");
+  assert.equal(normalizeNumber(""), null);
+});
+
+test("twilio-lookup sinceDaysAgo: Nd window, cap, and garbage rejection", () => {
+  const seven = sinceDaysAgo("7d")!;
+  assert.match(seven, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+  assert.ok(new Date(seven).getTime() <= Date.now() - 6.9 * 86_400_000);
+  const capped = sinceDaysAgo("400d")!;
+  assert.ok(new Date(capped).getTime() > Date.now() - 366 * 86_400_000, "window must cap at 365d");
+  assert.equal(sinceDaysAgo("last week"), null);
+});
+
+test("twilio-lookup errorCodeMeaning: known codes translated, 0/unknown pass through", () => {
+  assert.match(errorCodeMeaning("30006")!, /landline/);
+  assert.match(errorCodeMeaning(30004)!, /blocked/);
+  assert.equal(errorCodeMeaning(0), null, "0 is success, not an error");
+  assert.equal(errorCodeMeaning(null), null);
+  assert.match(errorCodeMeaning("99999")!, /99999/);
+});
+
 test("install-skills.sh: installs new skills, no-ops on identical, re-installs on change, never deletes orphans", () => {
   const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
   const script = join(repoRoot, "scripts", "install-skills.sh");
