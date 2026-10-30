@@ -159,7 +159,12 @@ update or `update-agent` dispatch; the IAM changes need a stack deploy):
 - **GitHub tokens**: mints are now repo-scoped (`repositories` + minimum
   `permissions` in the mint body) and allowlisted to the four PTP repos; a
   "hotnready token" can no longer touch every repo on the installation.
-  Mints are ledgered with the requester id.
+  Mints are ledgered with the requester id. Unattended box jobs (systemd
+  timers) mint via `--purpose <name>` against a hard-coded `PURPOSES` table
+  instead of `request-auth.json`, with a permission set that must be a strict
+  subset of the interactive one and a `timer:`-prefixed ledger identity — so a
+  timer needs no long-lived PAT in its `.env`. Adding a purpose is a reviewed
+  code change.
 - **Runner**: same-thread investigations serialize (shared workdir/session
   + a second request used to become "the newest requester" mid-run); thread
   records persist at case creation; queue bursts past the waiting-room cap
@@ -190,6 +195,14 @@ update or `update-agent` dispatch; the IAM changes need a stack deploy):
    `request-auth.json` (`writeAllowed: true`), `gh-token.mjs --repo
    pizza-to-the-polls/hotnready` — stderr must say "scoped to …" and a
    smoke push must still work.
+4. **Verify a purpose mint** (no case workdir, so run it anywhere):
+   `gh-token.mjs --repo pizza-to-the-polls/feedflag --purpose feedflag-digest`
+   — stderr must report `permissions {"issues":"write"}` and
+   `requester timer:feedflag-digest`, and `state/usage.jsonl` must gain a
+   matching `token-mint` line. Then confirm the refusals still refuse:
+   the same command with `--repo pizza-to-the-polls/pizzabase` exits 6, an
+   unknown `--purpose` exits 6, and `--repo` with no `--purpose` and no
+   `request-auth.json` still exits 3.
 
 ### Known residual — until the sandbox follow-up lands
 
