@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
-# Renders build/pizza-eagle.rendered.yaml: splices base64(scripts/bootstrap.sh)
+# Renders build/pizza-eagle.rendered.yaml: splices base64(gzip(scripts/bootstrap.sh))
 # into the @@BOOTSTRAP_B64@@ marker inside the UserData block.
+#
+# GZIP (2026-10-30): EC2 caps UserData at 16384 bytes, and bootstrap.sh had
+# grown to where the plain base64 blob alone was 15.5KB — every CFN deploy
+# from main failed at the LaunchTemplate ("User data is limited to 16384
+# bytes", InvalidUserData.Malformed — the 2026-10-30 feedflag-grant deploy
+# rolled back on it). gzip+base64 puts the payload at ~5.3KB with 3x headroom;
+# the UserData stub decodes with `base64 -d | gzip -d`.
 #
 # Single source of truth: edit scripts/bootstrap.sh, never the rendered blob
 # (it's gitignored). Deploy from build/pizza-eagle.rendered.yaml, NOT from
@@ -11,7 +18,16 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-B64=$(base64 < scripts/bootstrap.sh | tr -d '\n') # portable (macOS base64 has no -w0)
+B64=$(gzip -c scripts/bootstrap.sh | base64 | tr -d '\n') # portable (macOS base64 has no -w0)
+
+# Guard: fail at RENDER time, not at CFN execution. 12000 b64 bytes leaves
+# room for the stub and the CFN !Base64 re-encoding (x4/3) under the 16384
+# API limit with margin.
+if [ "${#B64}" -ge 12000 ]; then
+  echo "render: gzipped+b64 bootstrap payload is ${#B64} bytes (guard: <12000) —" \
+    "bootstrap.sh has grown too big; trim it or move logic off UserData" >&2
+  exit 1
+fi
 
 mkdir -p build
 python3 - "$B64" <<'PYEOF'
