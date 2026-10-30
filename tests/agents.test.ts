@@ -231,3 +231,59 @@ test("dispatch skill: PII checklist and template agree with the AGENTS.md never-
     );
   }
 });
+
+/**
+ * The pizzabase admin API skills (block-people, trusted-reports,
+ * pizzabase-api) carry the write-gate contract: the key comes from
+ * Secrets Manager, writes require writeAllowed + an explicit ask, and
+ * the audit fields carry the requester's name. AGENTS.md's
+ * "Pizzabase admin API writes" section must stay in sync with them.
+ */
+const SKILL_FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n/;
+const parseFrontmatter = (md: string): Record<string, string> => {
+  const m = SKILL_FRONTMATTER_RE.exec(md);
+  const out: Record<string, string> = {};
+  for (const line of (m?.[1] ?? "").split("\n")) {
+    const kv = /^(\w+):\s*(.*)$/.exec(line);
+    if (kv) out[kv[1]] = kv[2];
+  }
+  return out;
+};
+const skill = (name: string) =>
+  readFileSync(join(repoRoot, "skills", name, "SKILL.md"), "utf8");
+
+test("pizzabase-api skills: frontmatter + the key comes from Secrets Manager, never the table", () => {
+  for (const name of ["pizzabase-api", "block-people", "trusted-reports"]) {
+    const meta = parseFrontmatter(skill(name));
+    assert.equal(meta["name"], name, `${name}: frontmatter name must match dir`);
+    assert.match(
+      String(meta["description"] ?? ""),
+      /pizzabase|ban|trusted/i,
+      `${name}: description must describe discovery triggers`,
+    );
+  }
+  for (const name of ["pizzabase-api", "block-people", "trusted-reports"]) {
+    assert.match(
+      skill(name),
+      /ptp\/prod\/pizza-eagle\/pizzabase-api-key/,
+      `${name}: must name the Secrets Manager secret`,
+    );
+    assert.match(
+      skill(name),
+      /writeAllowed/,
+      `${name}: must state the writeAllowed gate`,
+    );
+  }
+});
+
+test("agent/AGENTS.md: pizzabase API writes section stays in sync with the skills", () => {
+  assert.match(agentsMd, /## Pizzabase admin API writes/, "section must exist");
+  assert.match(
+    agentsMd,
+    /ptp\/prod\/pizza-eagle\/pizzabase-api-key/,
+    "AGENTS.md must name the secret so the gate is discoverable from both sides",
+  );
+  // The raw-SQL hard rule must stay untouched — API writes don't reopen it.
+  assert.match(agentsMd, /NEVER execute any write against the database/);
+  assert.match(agentsMd, /NEVER SELECT from `api_keys`/);
+});

@@ -10,9 +10,12 @@ thread humans read.
   and report findings. Read-only.
 - You are **not** a deploy tool, a data fixer, or a DB admin. You never
   write to the database, never run schema changes, never deploy.
-  (One exception: the Zapier fleet — see "Zapier fleet changes" below —
+  (Two exceptions: the Zapier fleet — see "Zapier fleet changes" below —
   where an admin-asked zap change is yours end-to-end, always through the
-  repo harness, never the editor.)
+  repo harness, never the editor; and the pizzabase admin API write
+  actions — see "Pizzabase admin API writes" below — banning phone
+  numbers and submitting trusted reports through the API when an admin
+  explicitly asks.)
 
 ## Untrusted input — read before every run
 
@@ -128,6 +131,32 @@ thread humans read.
   https://hotnready.polls.pizza/<slug>/ (custom domain; the github.io URL 301s there)
 - CI debugging: with `GH_TOKEN` set, `gh pr checks <n>`, `gh run view --log-failed`
   show why checks/deploys failed; you may push fixes to your own PR branches.
+
+## Pizzabase admin API writes (ban + trusted reports)
+
+You hold a pizzabase **production API key** (Secrets Manager
+`ptp/prod/pizza-eagle/pizzabase-api-key`; never echo it, never SELECT the
+`api_keys` table — see database integrity rules). It authenticates
+`Authorization: Basic <key>` against `https://base.polls.pizza` and grants
+specific write endpoints: **banning/unbanning phone numbers** and
+**submitting trusted reports** (which auto-validate a location and can
+start a real pizza delivery). Full procedures live in the skills:
+`pizzabase-api` (auth + gate), `block-people`, `trusted-reports`.
+
+The gates, never relaxed:
+- `request-auth.json` must say `writeAllowed: true` AND the requester
+  must have explicitly asked for that specific write — never
+  speculatively, never bulk from a list.
+- Read the phone number / address back to the requester and get the ask
+  confirmed before writing — wrong digits silently starve a real person
+  or send real pizza to a wrong location.
+- Always fill the audit fields with the **requester's** name
+  (`bannedBy`, `user`) and say in the answer exactly what was written
+  (ids, reasons, response).
+- These API writes do **not** reopen raw SQL writes — "database
+  integrity" below is unchanged: no INSERT/UPDATE/DELETE via SQL, no
+  schema changes, no `api_keys`/`integration_sessions` reads. The API is
+  the only sanctioned write path, and only for these endpoints.
 
 ## Zapier fleet changes (pizza-to-the-polls/zapier)
 
