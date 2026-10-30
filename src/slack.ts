@@ -47,6 +47,13 @@ export function toSlackMrkdwn(md: string): string {
       );
 
       return part
+        // Bare member IDs ("@U2ZLJ2KBP") become real mentions. The thread
+        // transcript feeds the agent "@U..." raw (formatThreadMessages
+        // strips the angle brackets for readability), the agent echoes that
+        // form, and Slack only links <@ID> — bare @IDs posted as literal
+        // text (2026-10-29 dev thread). Already-linked IDs and code are
+        // untouched (the `[^<\w]` guard + the fence split above).
+        .replace(/(^|[^<\w])@(U[A-Z0-9]{7,11})(?![\w.])/g, (_m, pre: string, id: string) => `${pre}<@${id}>`)
         .replace(/^#{1,6}\s+(.+)$/gm, (_m, t) => `*${String(t).trim()}*`)
         .replace(/\*\*([^*\n]+)\*\*/g, (_m, t) => `*${t}*`)
         .replace(/\[([^\]\n]+)\]\((https?:[^)\s]+)\)/g, (_m, t, url) => `<${url}|${t}>`)
