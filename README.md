@@ -277,7 +277,7 @@ injection = incident: rotate the App key.
 
 Deployed 2026-10-23. Secrets live under `ptp/prod/pizza-eagle/*` (env,
 pi-config, gh-app-key, ga-readonly, bugsnag-token, retool-ssh-key,
-admin-ssh-key). Day-to-day tasks are in the Pizza to the Polls Todoist
+admin-ssh-key, twilio-readonly). Day-to-day tasks are in the Pizza to the Polls Todoist
 project (🤖Pi label); the design history and roadmap live in
 `SLACK_BOT_PLAN.md` (§10, P0–P5).
 

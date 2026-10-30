@@ -88,6 +88,19 @@ else
   rm -f /home/pizza-eagle/.config/bugsnag/readonly-token.tmp
 fi
 
+#### 5d. Twilio read-only API key — delivery-status lookups (scripts/twilio-lookup.mjs)
+# Restricted Twilio key (Messaging read only) — the lookup helper is
+# GET-only by construction; the credential grants nothing writable anyway.
+if aws secretsmanager get-secret-value --secret-id "${SECRETS_PREFIX}/twilio-readonly" \
+     --query SecretString --output text > /home/pizza-eagle/.config/ptp/twilio-readonly.json.tmp 2>/dev/null; then
+  mv /home/pizza-eagle/.config/ptp/twilio-readonly.json.tmp /home/pizza-eagle/.config/ptp/twilio-readonly.json
+  chown pizza-eagle:pizza-eagle /home/pizza-eagle/.config/ptp/twilio-readonly.json
+  chmod 600 /home/pizza-eagle/.config/ptp/twilio-readonly.json
+else
+  echo "WARN: secret ${SECRETS_PREFIX}/twilio-readonly not found — Twilio delivery lookups stay disabled" >&2
+  rm -f /home/pizza-eagle/.config/ptp/twilio-readonly.json.tmp
+fi
+
 #### 6. Operator context + skills for the bot user
 install -d -o pizza-eagle -g pizza-eagle -m 755 /opt/pizza-eagle/state
 install -o pizza-eagle -g pizza-eagle -m 644 "$PTP_BOT_HOME/agent/AGENTS.md" \
