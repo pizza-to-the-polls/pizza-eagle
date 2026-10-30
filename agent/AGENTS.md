@@ -280,13 +280,9 @@ world-readable by design.)
 Useful relations: `reports.upload_id → uploads.id`,
 `uploads.location_id → locations.id`, `reports.location_id → locations.id`.
 `uploads.media_status`: none | processing | ready | failed.
-`uploads.moderation_status`: ⚠️ **dead column — ignore it.** Every row is
-`pending`; nothing ever writes `clean|flagged|rejected`, and NOTHING gates on
-`pending`. There is NO moderation step and NO moderation queue — never say an
-upload/report is "awaiting moderation" or "in the moderation queue".
-(2026-10-30: a fully-live report was misreported as stuck in a phantom
-"moderation queue" from this column. Removal in flight: pizzabase#357 —
-when it lands, delete this line and any `moderationStatus` mention.)
+(moderation_status/moderation_score were dropped 2026-10-30 —
+pizzabase#357/#358; nothing ever wrote or gated on them. If a moderation
+queue ever becomes real, it will need new columns + this doc.)
 
 ## Known investigation patterns
 
