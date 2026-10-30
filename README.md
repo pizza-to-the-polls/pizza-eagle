@@ -25,7 +25,7 @@ systemd/              pizza-eagle.service + update/backup/prune timers + failure
 scripts/bootstrap.sh cloud-init user-data (idempotent; EIP+DNS self-registration)
 scripts/render-template.sh  splices bootstrap.sh into the CFN template's UserData
 scripts/ga.mjs       zero-dep GA4 query helper (readonly SA; report/realtime/accounts)
-scripts/gh-token.mjs GitHub App installation-token minter (pizza-eagle-agent; PEM from Secrets Manager)
+scripts/gh-token.mjs GitHub App installation-token minter (pizza-eagle-agent; PEM from Secrets Manager; `--purpose` for unattended box jobs)
 scripts/publish-hotnready.sh  one-shot publisher to the hotnready Pages sandbox
 scripts/pizza-psql   human DB console (SSM tunnel + Secrets Manager; no secrets in history)
 scripts/notify-failure.sh     unit failures → Slack channel (webhook or bot token)
@@ -260,6 +260,23 @@ what the boundary actually is, and what was fixed:
   minimum `permissions` in the mint body; raw `--installation` minting
   removed) and `publish-hotnready.sh` refuses without the gate. Every mint
   + publish lands in the usage ledger bound to the requester id.
+- **Purpose mints (unattended jobs)**: a systemd timer has no Slack case, so it
+  can never satisfy `request-auth.json` — correctly, since that gate exists to
+  stop a prompt-injected investigation from minting. Instead of handing such a
+  job a long-lived PAT, `gh-token.mjs --repo <owner/name> --purpose <name>`
+  authorises against a **hard-coded `PURPOSES` table**: one purpose binds
+  exactly one repo, one permission set that must be a **strict subset** of
+  `MINT_PERMISSIONS` (enforced by a test, not by convention), and one
+  `timer:`-prefixed ledger identity. The two paths are mutually exclusive —
+  `--purpose` never reads the case file, and `--repo` alone still requires it.
+  A purpose cannot be repointed at another repo (exit 6), an unknown purpose
+  is refused, and the repo allowlist still applies (exit 5). Adding a purpose
+  is a reviewed code change, in the same spirit as extending
+  `GITHUB_ALLOWED_REPOS` requiring this write gate to have been updated first.
+  This does **not** reduce what root on the box can mint (the instance role can
+  reach the App key — that is issue #14); it removes the durable secret from
+  the consumer's `.env`, shortens the token to 1h, and grants less than the
+  interactive path.
 - **Slack input**: question/thread text is untrusted — it can imitate prose
   auth markers in `case-history.md` (verified) but cannot create
   `request-auth.json`. Same-thread runs serialize (`src/queue.ts`), burst

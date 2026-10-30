@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { appJwt, b64url as ghB64, readRequestAuth } from "../scripts/gh-token.mjs";
+import { appJwt, b64url as ghB64, checkPurposeMint, MINT_PERMISSIONS, PURPOSES, readRequestAuth } from "../scripts/gh-token.mjs";
 import { b64url as gaB64, dimensionFilter, parseArgs, resolveDate } from "../scripts/ga.mjs";
 import { errorCodeMeaning, normalizeNumber, sinceDaysAgo } from "../scripts/twilio-lookup.mjs";
 
@@ -202,6 +202,127 @@ test("gh-token readRequestAuth: absent/unreadable file ⇒ null", () => {
   assert.equal(readRequestAuth(dir), null, "unparseable");
   writeFileSync(join(dir, "request-auth.json"), JSON.stringify({ writeAllowed: true }));
   assert.deepEqual(readRequestAuth(dir), { writeAllowed: true });
+});
+
+// ── purpose mints: unattended box jobs (issue #44) ─────────────────────
+//
+// A systemd timer has no Slack case, so it can never satisfy the
+// request-auth.json gate. Rather than hand it a long-lived PAT, it declares a
+// purpose: a hard-coded binding to one repo, a NARROWER permission set, and a
+// `timer:` ledger identity. These pin that the purpose path grants strictly
+// less than the interactive path and cannot be widened at the call site.
+
+test("gh-token purposes: every binding is narrower than MINT_PERMISSIONS", () => {
+  const names = Object.keys(PURPOSES);
+  assert.ok(names.length > 0, "at least one purpose is declared");
+  for (const name of names) {
+    const p = PURPOSES[name as keyof typeof PURPOSES];
+    assert.ok(p.repo.includes("/"), `${name}: repo is owner/name`);
+    assert.ok(p.requester.startsWith("timer:"), `${name}: ledger identity is prefixed timer:`);
+    const keys = Object.keys(p.permissions);
+    assert.ok(keys.length > 0, `${name}: declares at least one permission`);
+    for (const [k, v] of Object.entries(p.permissions)) {
+      assert.ok(
+        k in MINT_PERMISSIONS,
+        `${name}: permission "${k}" is not one the interactive path holds — a purpose may never grant a new capability`,
+      );
+      assert.equal(
+        v,
+        MINT_PERMISSIONS[k as keyof typeof MINT_PERMISSIONS],
+        `${name}: "${k}" must match the interactive level, not exceed it`,
+      );
+    }
+    assert.ok(
+      keys.length < Object.keys(MINT_PERMISSIONS).length,
+      `${name}: a purpose must be a STRICT subset of MINT_PERMISSIONS (${JSON.stringify(p.permissions)})`,
+    );
+  }
+});
+
+test("gh-token checkPurposeMint: pure validation, no I/O", () => {
+  const ok = checkPurposeMint("feedflag-digest", "pizza-to-the-polls/feedflag");
+  assert.ok("entry" in ok && ok.entry, "valid purpose + matching repo resolves");
+  assert.deepEqual(ok.entry?.permissions, { issues: "write" });
+
+  for (const [purpose, repo, why] of [
+    ["feedflag-digest", "pizza-to-the-polls/pizzabase", "allowed repo, wrong purpose"],
+    ["feedflag-digest", "evilcorp/example", "off-allowlist repo"],
+    ["nope", "pizza-to-the-polls/feedflag", "unknown purpose"],
+    [undefined, "pizza-to-the-polls/feedflag", "missing purpose name"],
+  ] as const) {
+    const r = checkPurposeMint(purpose as string | undefined, repo);
+    assert.ok("error" in r && r.error, `${why}: refused`);
+    assert.equal(r.code, 6, `${why}: distinct exit code 6`);
+  }
+  assert.match(
+    String(checkPurposeMint("nope", "pizza-to-the-polls/feedflag").error),
+    /valid: feedflag-digest/,
+    "an unknown purpose names the valid ones",
+  );
+});
+
+test("gh-token: purpose mint needs no request-auth.json and grants issues only", () => {
+  // No `auth` — the case file is absent, which refuses the interactive path.
+  const r = runHelper(["--repo", "pizza-to-the-polls/feedflag", "--purpose", "feedflag-digest"]);
+  assert.equal(r.code, 0, "purpose path mints without request-auth.json");
+  const mint = r.calls.find((c) => c.method === "POST");
+  assert.ok(mint, "mint POST present");
+  const body = JSON.parse(mint.body ?? "{}");
+  assert.deepEqual(body.repositories, ["feedflag"], "scoped to the one repo");
+  assert.deepEqual(
+    body.permissions,
+    { issues: "write" },
+    "issues only — NOT MINT_PERMISSIONS; a digest must not push branches or merge",
+  );
+  assert.notDeepEqual(body.permissions, MINT_PERMISSIONS, "never the interactive set");
+  assert.match(r.ledger, /"event":"token-mint"/);
+  assert.match(r.ledger, /"requester":"timer:feedflag-digest"/, "ledger names the timer, not a human");
+  assert.match(r.ledger, /feedflag/);
+});
+
+test("gh-token: a purpose cannot be pointed at another repo", () => {
+  const r = runHelper(["--repo", "pizza-to-the-polls/pizzabase", "--purpose", "feedflag-digest"], {
+    auth: { requester: "U2ZLJ2KBP", writeAllowed: true },
+  });
+  assert.equal(r.code, 6, "mismatch refuses even with write powers granted");
+  assert.equal(r.calls.filter((c) => c.method === "POST").length, 0, "no mint POST");
+  assert.equal(r.ledger, "", "no ledger entry for a refused mint");
+});
+
+test("gh-token: unknown or valueless --purpose refuses", () => {
+  const unknown = runHelper(["--repo", "pizza-to-the-polls/feedflag", "--purpose", "deploy-everything"], {
+    auth: { requester: "U2ZLJ2KBP", writeAllowed: true },
+  });
+  assert.equal(unknown.code, 6, "an undeclared purpose is not mintable");
+  assert.equal(unknown.calls.filter((c) => c.method === "POST").length, 0);
+
+  const valueless = runHelper(["--repo", "pizza-to-the-polls/feedflag", "--purpose"]);
+  assert.equal(valueless.code, 6, "--purpose with no name refuses");
+  assert.equal(valueless.calls.length, 0, "no GitHub calls");
+});
+
+test("gh-token: the purpose path still enforces the repo allowlist", () => {
+  const r = runHelper(["--repo", "pizza-to-the-polls/feedflag", "--purpose", "feedflag-digest"], {
+    env: { GITHUB_ALLOWED_REPOS: "pizza-to-the-polls/hotnready" },
+  });
+  assert.equal(r.code, 5, "allowlist refusal (5), not a purpose refusal (6)");
+  assert.equal(r.calls.length, 0, "no GitHub calls for an off-allowlist repo");
+});
+
+test("gh-token: the interactive gate is unchanged by the purpose path", () => {
+  // --repo with no --purpose must still require request-auth.json, still grant
+  // the full MINT_PERMISSIONS, and still refuse without the case file.
+  const noFile = runHelper(["--repo", "pizza-to-the-polls/feedflag"]);
+  assert.equal(noFile.code, 3, "the case-file gate still refuses with 3, not 6");
+  assert.equal(noFile.calls.length, 0);
+
+  const gated = runHelper(["--repo", "pizza-to-the-polls/feedflag"], {
+    auth: { requester: "U2ZLJ2KBP", writeAllowed: true },
+  });
+  assert.equal(gated.code, 0);
+  const body = JSON.parse(gated.calls.find((c) => c.method === "POST")?.body ?? "{}");
+  assert.deepEqual(body.permissions, MINT_PERMISSIONS, "interactive mints keep the full set");
+  assert.match(gated.ledger, /"requester":"U2ZLJ2KBP"/, "a human requester, not a timer");
 });
 
 /**
