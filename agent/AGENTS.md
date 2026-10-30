@@ -290,18 +290,29 @@ when it lands, delete this line and any `moderationStatus` mention.)
 
 ## Known investigation patterns
 
-- **"Where is the report (just submitted) for <location>?"** — three cheap
+- **"Where is the report (just submitted) for <location>?"** — four cheap
   checks before answering, in order:
   1. **DB**: newest `reports` rows for the location (id, created_at,
      wait_time, skipped_at, upload_id → `uploads.media_status`). A report is
      LIVE unless `skipped_at` is set — no other column hides or queues it.
-  2. **Slack**: the feed zaps announce reports as REPLIES — "♻️ Another
+  2. **Zap trail — the authoritative "where did it go" record.** The
+     new-report zap (migrated-zap-new-report) fans out from the DB row and
+     its run history shows the whole downstream trail in one lookup:
+     `/opt/ptp-zapier-workflows` → `npm run monitor -- --only
+     migrated-zap-new-report --hours 6`, find the run for this report.
+     The run links BOTH downstream artifacts: the **HelpScout conversation
+     it created/updated** (Reports mailbox) and the **Slack announcement
+     reply it posted**. If a volunteer asks where a report went, THIS is
+     the check that answers it — don't claim a report didn't reach
+     downstream systems without looking at its zap run.
+  3. **Slack**: the feed zaps announce reports as REPLIES — "♻️ Another
      report at this location" under the location's original 🚨 "New report"
      root thread (#feed-reports/#feed-lines). A brand-new report may be
      several replies deep in an EXISTING thread, not a fresh top-level post —
      link the thread in the answer, and don't say "it never posted" without
-     looking inside the location's recent threads.
-  3. **Site visibility — verify, don't infer**: before saying anything is
+     looking inside the location's recent threads (the zap run from step 2
+     points straight at the reply).
+  4. **Site visibility — verify, don't infer**: before saying anything is
      "not visible on the site", check the public API:
      `curl https://base.polls.pizza/locations/<id>` — if the report is in
      `reports[]`, it IS visible, regardless of any status column.
