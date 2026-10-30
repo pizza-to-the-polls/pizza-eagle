@@ -228,9 +228,9 @@ test("twilio-lookup normalizeNumber: E164 passthrough, US completion, junk rejec
   assert.equal(normalizeNumber(""), null);
 });
 
-test("twilio-lookup sinceDaysAgo: Nd window, cap, and garbage rejection", () => {
+test("twilio-lookup sinceDaysAgo: Nd window (date-only, for DateSent>=), cap, and garbage rejection", () => {
   const seven = sinceDaysAgo("7d")!;
-  assert.match(seven, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+  assert.match(seven, /^\d{4}-\d{2}-\d{2}$/, "must be date-only — a full timestamp in DateSent= means an exact-second match");
   assert.ok(new Date(seven).getTime() <= Date.now() - 6.9 * 86_400_000);
   const capped = sinceDaysAgo("400d")!;
   assert.ok(new Date(capped).getTime() > Date.now() - 366 * 86_400_000, "window must cap at 365d");

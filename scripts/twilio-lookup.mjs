@@ -70,11 +70,14 @@ export function normalizeNumber(raw) {
 }
 
 export function sinceDaysAgo(since) {
-  // "--since 7d" -> ISO DateSent>= filter. Accepts Nd only.
+  // "--since 7d" -> YYYY-MM-DD for the DateSent>= filter. Accepts Nd only.
+  // Twilio quirk (verified live): the operator belongs in the parameter NAME
+  // (DateSent>=), and a full timestamp in DateSent= means "sent at this
+  // exact second" — a silent zero. Date-only + >= is the window form.
   const m = /^(\d+)d$/.exec(String(since ?? "30d"));
   if (!m) return null;
   const days = Math.min(Number(m[1]), 365);
-  return new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 19) + "Z";
+  return new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
 }
 
 function usage(code = 1) {
@@ -130,9 +133,9 @@ async function twilioGet(creds, params) {
 function human(messages) {
   const lines = [];
   for (const m of messages) {
-    const when = (m.date_sent ?? m.date_created ?? "").replace("T", " ").replace("Z", "");
+    const when = (m.date_sent ?? m.date_created ?? "?").replace(" +0000", "");
     const err = errorCodeMeaning(m.error_code);
-    const price = Number(m.price ?? 0);
+    const price = Math.abs(Number(m.price ?? 0));
     lines.push(
       `${when}  ${m.direction.padEnd(13)} ${m.status.padEnd(11)} ` +
       `to=${m.to ?? "?"} from=${m.from ?? "?"} ` +
@@ -175,12 +178,11 @@ export async function main(argv) {
     const since = sinceDaysAgo(flags.since);
     if (flags.since && !since) { console.error(`--since must be like 7d (days), got '${flags.since}'`); usage(); }
     const limit = Math.min(Number(flags.limit ?? 25), 100);
-    const params = { To: number, PageSize: limit };
-    if (since) params.DateSent = since;
+    const params = { To: number, PageSize: limit, ...(since && { "DateSent>=": since }) };
     const body = await twilioGet(creds, params);
     // To= misses outbound-reply: a number can appear in either field.
     if (body.messages?.length === 0) {
-      const fromBody = await twilioGet(creds, { From: number, PageSize: limit, ...(since && { DateSent: since }) });
+      const fromBody = await twilioGet(creds, { From: number, PageSize: limit, ...(since && { "DateSent>=": since }) });
       if (fromBody.messages?.length === 0 && process.env.HUMAN === "1") {
         console.log(`query: ${number} since ${since ?? "30d"} (checked To and From) — no messages found`);
       } else {
