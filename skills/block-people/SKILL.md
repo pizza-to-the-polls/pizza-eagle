@@ -1,6 +1,6 @@
 ---
 name: block-people
-description: Ban or unban a phone number from receiving pizza via the pizzabase admin API (POST/DELETE /banned-phone-numbers) — for abuse, spam, or fake reports. Use when asked to "block", "ban", or "blacklist" someone/a number, to check whether a number is banned, or to lift a ban.
+description: Ban or unban a phone number from receiving pizza via the pizzabase admin API (POST/DELETE /banned-phone-numbers), or block/unblock a submission IP (POST/DELETE /blocked-ips) — for abuse, spam, or fake reports. Use when asked to "block", "ban", or "blacklist" someone/a number/an IP address, to check whether a number or IP is blocked, or to lift a ban.
 ---
 
 # Block people — banned phone numbers (prod)
@@ -61,3 +61,29 @@ coming off, then delete.
 - After banning, say in the answer: the number, the reason, the ban id,
   and that existing reports/orders are untouched (the ban only affects
   *future* report submissions from that number).
+
+## Block a submission IP (same write gate)
+
+IP blocks stop `POST /report` / `POST /upload` from an address at the edge
+(403, no rows created) — use for abuse from a source IP (e.g. a flood of
+fake web reports). Same gate: `writeAllowed: true` + explicit ask.
+
+```bash
+curl -s -X POST -H "Authorization: Basic $PIZZABASE_KEY" \
+  -H 'Content-Type: application/json' \
+  -d '{"ip": "203.0.113.7", "reason": "flood of fake reports", "blockedBy": "Scott Duncombe"}' \
+  https://base.polls.pizza/blocked-ips
+```
+
+- `ip` — the raw address as seen in investigation output (`uploads.ip_address`,
+  CloudWatch filter patterns). The server normalizes it (IPv4-mapped IPv6 →
+  IPv4) and stores only its SHA-256 hash — the blocklist is not a PII ledger.
+- `blockedBy` — the **requester's** Slack name, as with bans.
+- Lookup/unblock: `GET /blocked-ips/:id` by row id (list rows via
+  `GET /blocked-ips?limit=100&page=0`), `DELETE /blocked-ips/:id`.
+- To check whether an IP is blocked without the row id: `ipHash` it the same
+  way (normalize → sha256 hex) and grep the list — or just try the block:
+  a duplicate insert of the same normalized IP upserts-collides (unique hash);
+  safest is look up by hash in the list first.
+- `X-Forwarded-For` is never trusted directly — pizzabase uses the proxy-
+  computed `req.ip`; pass through what the investigation shows.
