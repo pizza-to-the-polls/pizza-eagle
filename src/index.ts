@@ -333,24 +333,33 @@ async function main(): Promise<void> {
   // Liveness heartbeat: one CloudWatch datapoint every 5 minutes so an
   // alarm on absence (stack: HeartbeatAlarm) catches a silently-dead
   // process or hung socket — "systemd active" alone can lie. The same
-  // call carries MemoryPercent (stack: OpsMemoryAlarm): on 2026-10-31 an
-  // election-night feedflag leg OOM'd the whole box (SSM agent + eagle
-  // dead, Retool tunnel stranded) with no memory signal anywhere — this
-  // pages at 85% before the OOM, and it rides the existing
+  // tick also carries MemoryPercent (stack: OpsMemoryAlarm): on
+  // 2026-10-31 an election-night feedflag leg OOM'd the whole box (SSM
+  // agent + eagle dead, Retool tunnel stranded) with no memory signal
+  // anywhere — this pages at 85% before the OOM, and it rides the existing
   // HeartbeatAlarmTopic → #dev plumbing with no instance dimension, so
   // it survives ASG replacement.
-  const heartbeat = setInterval(() => {
-    const memPct = Math.round(100 * (1 - freemem() / totalmem()));
+  //
+  // NB: TWO SEPARATE put calls, never two --metric-data entries — aws-cli
+  // (verified 2.36 + 2.38, 2026-10-31) publishes only the LAST entry of
+  // repeated --metric-data flags and still exits 0. The dual-entry form
+  // this replaced silently dropped every Heartbeat datapoint
+  // (MemoryPercent kept landing) and the liveness alarm stayed ALARM
+  // over a healthy bot — caught live on the t4g.medium rebirth.
+  const emitMetric = (metricData: string, name: string) =>
     execFile("aws", [
       "cloudwatch", "put-metric-data",
       "--namespace", "pizza-eagle",
-      "--metric-data", "MetricName=Heartbeat,Value=1",
-      "--metric-data", `MetricName=MemoryPercent,Value=${memPct}`,
+      "--metric-data", metricData,
       "--region", "us-west-2",
     ], (e) => {
-      if (e) console.warn("[pizza-eagle] heartbeat emit failed (will retry):", (e as Error).message);
-      else log("[pizza-eagle] heartbeat");
+      if (e) console.warn(`[pizza-eagle] ${name} emit failed (will retry):`, (e as Error).message);
+      else log(`[pizza-eagle] ${name}`);
     });
+  const heartbeat = setInterval(() => {
+    emitMetric("MetricName=Heartbeat,Value=1", "heartbeat");
+    const memPct = Math.round(100 * (1 - freemem() / totalmem()));
+    emitMetric(`MetricName=MemoryPercent,Value=${memPct}`, "memory");
   }, 5 * 60_000);
   heartbeat.unref?.();
 
