@@ -18,7 +18,7 @@
  */
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 const sh = promisify(execFile);
@@ -198,6 +198,12 @@ await check("session resume across the uid boundary", async () => {
   mkdirSync(workRoot, { recursive: true });
   const scratch = mkdtempSync(join(workRoot, ".selfcheck-"));
   try {
+    // Mirror the listener's case-workdir prep exactly (investigate.ts
+    // runInvestigation): mkdtemp yields 0700, but the inv user must be able
+    // to TRAVERSE into the workdir — the listener chmods it 0770 before
+    // every run. (First landing of this probe skipped this and failed on
+    // the box: `test -w` never reached the file through the 0700 parent.)
+    chmodSync(scratch, 0o770);
     mkdirSync(join(scratch, "sessions"), { recursive: true });
     const legacy = join(
       scratch, "sessions",
