@@ -240,6 +240,16 @@ sudo bash -c 'find /opt/pizza-eagle/state/work -path "*/sessions/*.jsonl" \
   -exec chgrp pizza-eagle {} + -exec chmod 2770 {} +'
 ```
 
+### Staged-credential cleanup broke every aws-using investigation (2026-10-31, issue #57)
+
+`trap 'rm -rf "$STAGE"' EXIT` ran as the listener and failed on the
+inv-owned `~/.aws/cli/cache` (0700) the dropped child had written into the
+staged HOME — `set -e` fired INSIDE the trap and the wrapper exited 1, so
+every investigation that called the aws CLI reported "pi exited with
+code 1" and pi's ANSWER was discarded (Lee's two order-duplicate runs).
+The trap is now the status-neutral `cleanup_stage` (drops to the inv user
+for the removal); self-check probe 10d replays the failure shape daily.
+
 ## Alert channels
 
 | What | Where |

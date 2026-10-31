@@ -414,6 +414,23 @@ test("run-investigation-container.sh: repairs pre-isolation session perms before
   }
 });
 
+test("run-investigation-container.sh: stage cleanup is status-neutral and drops to the inv user (issue #57)", () => {
+  const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const body = readFileSync(join(repoRoot, "scripts", "run-investigation-container.sh"), "utf8");
+  // 2026-10-31 post-mortem: `trap 'rm -rf "$STAGE"' EXIT` failed on the
+  // dropped child's inv-owned ~/.aws/cli/cache (untraversable 0700 dirs in
+  // the staged HOME), errexit fired INSIDE the trap, the wrapper exited 1 —
+  // and the listener discarded pi's ANSWER ("investigation failed") though
+  // pi had answered. self-check probe 10d replays this functionally on the
+  // box; this guard keeps the source from regressing silently.
+  assert.ok(!body.includes('trap \'rm -rf "$STAGE"\''), "raw rm must never be the EXIT trap");
+  assert.ok(body.includes("trap cleanup_stage EXIT"), "the EXIT trap must be the status-neutral cleanup function");
+  assert.ok(
+    body.includes('sudo -n -u "$INV_USER" -- rm -rf'),
+    "cleanup must drop to the inv user for inv-owned files",
+  );
+});
+
 test("install-skills.sh: installs new skills, no-ops on identical, re-installs on change, never deletes orphans", () => {
   const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
   const script = join(repoRoot, "scripts", "install-skills.sh");
