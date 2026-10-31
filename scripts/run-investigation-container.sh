@@ -235,12 +235,37 @@ stage_home() {  # stage_home <stage-root>
   chmod -R a+rX "$stage/home/.config"
 }
 
+# ── Staged-credential cleanup ─────────────────────────────────
+# The EXIT trap removes the per-run staged HOME (pi config + staged triage
+# creds) — but the dropped child WRITES into it while it runs (~/.pi locks,
+# and the aws CLI's ~/.aws/cli/cache), and those files/dirs are INV-owned
+# 0700 — the listener cannot even traverse them, so a plain `rm -rf` in the
+# trap fails. Worse: under `set -e` that failure fires errexit INSIDE the
+# trap, and the wrapper exits 1 — clobbering pi's success status, so the
+# listener throws pi's ANSWER away and reports "investigation failed"
+# (2026-10-31: two of Lee's order-duplicate investigations; issue #57).
+# Cleanup therefore drops to the inv user for the bulk removal when the
+# listener's own rm fails (sudoers allows exactly that pair; the 0777
+# stage home lets inv unlink the listener-owned staged files inside it,
+# and the listener then removes the now-empty skeleton it owns), and is
+# status-neutral: nothing here can fail the run — the trap preserves the
+# child's exit status. If both removals fail, the stage lingers in the
+# unit's PrivateTmp until the next restart — degraded, never silently.
+cleanup_stage() {
+  local s="${STAGE:-}"
+  [[ -n "$s" && -d "$s" ]] || return 0
+  if ! rm -rf "$s" 2>/dev/null; then
+    sudo -n -u "$INV_USER" -- rm -rf "$s" 2>/dev/null || true
+    rm -rf "$s" 2>/dev/null || true
+  fi
+}
+trap cleanup_stage EXIT
+
 # ── Mode selection ─────────────────────────────────────────────────────────
 if command -v podman >/dev/null 2>&1 && can_drop && image_available; then
   echo "run-investigation-container: mode 1 — podman container as $INV_USER (image $INV_IMAGE)" >&2
 
   STAGE="$(mktemp -d "${TMPDIR:-/tmp}/pizza-eagle-inv.XXXXXX")"
-  trap 'rm -rf "$STAGE"' EXIT
   stage_home "$STAGE"
 
   # Helper scripts (gh-token.mjs, ga.mjs, publish-hotnready.sh) mounted
@@ -287,7 +312,6 @@ elif can_drop; then
   # stages and point the drop at it: UID boundary + a writable, populated
   # HOME, in the listener's PrivateTmp, cleaned up on exit.
   STAGE="$(mktemp -d "${TMPDIR:-/tmp}/pizza-eagle-inv.XXXXXX")"
-  trap 'rm -rf "$STAGE"' EXIT
   stage_home "$STAGE"
   DROP_HOME="$STAGE/home"
   run_dropped "$PI_BIN" "${PI_ARGS[@]}"

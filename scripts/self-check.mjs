@@ -15,6 +15,8 @@
  *                                       9. systemd units match the repo
  *                                      10. investigation drop + session resume
  *                                          across the uid boundary (10c)
+ *                                         + stage cleanup keeps pi's exit
+ *                                          status (10d)
  */
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -214,6 +216,42 @@ await check("session resume across the uid boundary", async () => {
     ensureCaseWorkdirPerms(scratch);
     // The drop must be able to append the legacy file (group pizza-eagle).
     await sh("sudo", ["-n", "-u", invUser, "--", "test", "-w", legacy]);
+    return true;
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+// 10d. stage cleanup keeps pi's exit status (2026-10-31, issue #57).
+// Replay of the day's second wrapper bug: the EXIT trap's `rm -rf
+// "$STAGE"` ran as the listener, failed on the dropped child's inv-owned
+// ~/.aws/cli/cache (untraversable 0700 dirs in the staged HOME), errexit
+// fired INSIDE the trap — and the wrapper exited 1, so the listener
+// DISCARDED pi's answer ("investigation failed" though pi had answered;
+// two of Lee's order-duplicate runs). A fake PI_BIN writes the exact
+// inv-owned shapes into the staged HOME as the dropped user; the wrapper
+// must still exit 0 with the cleanup trap in place.
+await check("stage cleanup keeps pi's exit status (inv-owned files)", async () => {
+  const invUser = env.INV_USER ?? "pizza-eagle-inv";
+  const stateRoot = env.BOT_STATE_DIR ?? "/opt/pizza-eagle/state";
+  const workRoot = join(stateRoot, "work");
+  mkdirSync(workRoot, { recursive: true });
+  const scratch = mkdtempSync(join(workRoot, ".selfcheck-"));
+  try {
+    // The listener's prep (investigate.ts): the wrapper re-chmods anyway,
+    // but keep the fixture honest — the inv user must traverse the workdir.
+    chmodSync(scratch, 0o770);
+    const fakepi = join(scratch, "fakepi");
+    writeFileSync(
+      fakepi,
+      '#!/usr/bin/env bash\nmkdir -p "$HOME/.aws/cli/cache" && touch "$HOME/.aws/cli/cache/session.db"\n',
+    );
+    chmodSync(fakepi, 0o755);
+    // Non-zero wrapper exit → sh throws → probe red (the exact regression).
+    await sh("bash", [
+      "/opt/pizza-eagle/scripts/run-investigation-container.sh",
+      scratch, "11111111-1111-4111-8111-111111111111", "probe",
+    ], { env: { ...process.env, PI_BIN: fakepi } });
     return true;
   } finally {
     rmSync(scratch, { recursive: true, force: true });
