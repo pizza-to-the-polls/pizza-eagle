@@ -23,6 +23,11 @@ ADMIN_USER="duncombe"                          # sudo-capable human; reached via
 # succeeding with an old version is not a failure — the old || fallback
 # never fired).
 dnf install -y git jq amazon-cloudwatch-agent
+# iptables-nft: pizza-eagle-investigation-net.service (egress fence) runs
+# /usr/sbin/iptables — install-units.sh verifies every unit file and hard-
+# fails the nightly update on a box born without it (2026-10-31: the old
+# box carried this out of band; the fresh t4g.medium failed every 04:30 run).
+dnf install -y iptables-nft
 curl -fsSL https://rpm.nodesource.com/setup_24.x | bash -
 dnf install -y nodejs
 
@@ -31,6 +36,28 @@ npm install -g @earendil-works/pi-coding-agent
 
 #### 3. Bot OS user — no sudo, its only identity is the instance role
 id -u pizza-eagle &>/dev/null || useradd -r -m -s /usr/sbin/nologin pizza-eagle
+
+#### 3b. Investigation sandbox prerequisites (issue #5 isolation boundary)
+# The old box created these OUT OF BAND — a fresh instance was born without
+# them (2026-10-31 rebirth): run-investigation-container.sh fell back to mode 2
+# unprivileged sudo, and install-units.sh's systemd-analyze verify hard-failed
+# the nightly update (iptables missing) before installing any unit.
+#   - pizza-eagle-inv: the unprivileged investigation user (never a login)
+#   - group pizza-eagle membership: case-workdir group access (mode 0770)
+#   - /var/lib/pizza-eagle-inv: rootless podman store; pizza-eagle.service's
+#     ReadWritePaths references it (status=226 outage if absent — see
+#     scripts/install-units.sh)
+#   - sudoers rule: exactly what scripts/run-investigation-container.sh's
+#     header documents (env is carried explicitly by its `env` wrapper, so
+#     no env_keep knobs here)
+id -u pizza-eagle-inv &>/dev/null || useradd -r -m -s /usr/sbin/nologin pizza-eagle-inv
+usermod -aG pizza-eagle pizza-eagle-inv
+mkdir -p /var/lib/pizza-eagle-inv
+chown -R pizza-eagle-inv:pizza-eagle-inv /var/lib/pizza-eagle-inv
+printf 'pizza-eagle ALL=(pizza-eagle-inv) NOPASSWD: ALL\n' \
+  > /etc/sudoers.d/pizza-eagle-investigation
+chmod 440 /etc/sudoers.d/pizza-eagle-investigation
+visudo -c
 
 #### 4. Checkout
 mkdir -p "$PTP_BOT_HOME"

@@ -38,6 +38,13 @@ ExecStartPre=/usr/sbin/runuser -u pizza-eagle -- env HOME=/home/pizza-eagle /bin
 # OnFailure alerts instead of the pull dying with a confusing git error.
 ExecStartPre=/usr/sbin/runuser -u pizza-eagle -- env HOME=/home/pizza-eagle /bin/bash -c 'if [ -n "$(git -C /opt/pizza-eagle status --porcelain)" ]; then echo "dirty-tree guard: tree still dirty after self-heal" >&2; git -C /opt/pizza-eagle status --porcelain >&2; exit 1; fi'
 ExecStart=/usr/sbin/runuser -u pizza-eagle -- env HOME=/home/pizza-eagle git -C /opt/pizza-eagle pull --ff-only
+# Investigation-sandbox deps (2026-10-31 rebirth incident): pizza-eagle-investigation-
+# net.service needs /usr/sbin/iptables, and install-units.sh's systemd-analyze
+# verify hard-fails the whole nightly on a box born without it (the old box
+# carried it out of band — a fresh t4g.medium failed every 04:30 run). Bootstrap
+# §3b owns the rest (pizza-eagle-inv user, sudoers); this dnf is the piece that
+# can rot between AMIs, so the nightly self-heals it.
+ExecStart=/usr/bin/dnf install -y iptables-nft
 # Security: pull Node.js patch releases from NodeSource nightly (no-op when
 # current). Critical CVEs (e.g. the Oct 2026 RCE affecting 22.x) otherwise go
 # unpatched until an instance is replaced. Service restart below picks up

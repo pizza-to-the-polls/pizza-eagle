@@ -13,6 +13,13 @@ One page. If Scott's unavailable, this keeps the bird flying.
   04:30 run pulls + rebuilds + restarts; if `git pull`/`npm` lines fail, the bot is
   silently running stale code. (2026-10-24..25: every nightly failed on root-vs-
   `pizza-eagle` repo ownership while the bot kept answering on day-1 code.)
+- **Investigation sandbox prerequisites**: `pizza-eagle-inv` user + sudoers rule
+  + `iptables-nft` are installed by bootstrap §3b/§1 — a box born without them
+  fails the nightly at `install-units.sh`'s systemd-analyze verify
+  (`FATAL: pizza-eagle-investigation-net.service failed verify` — 2026-10-31
+  rebirth incident, first three 04:30 runs). Fix: PR #51 bootstrap + the update
+  unit's `dnf install -y iptables-nft` self-heal; symptom on a broken box is the
+  fence unit missing from `/etc/systemd/system/` entirely.
 - **Deployed code version**: `ssh ptp-ops "git -c safe.directory=/opt/pizza-eagle -C /opt/pizza-eagle log --oneline -1"`
   — compare against origin/main; the box should never lag a day behind.
 
