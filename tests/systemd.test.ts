@@ -626,3 +626,42 @@ test("scripts: install-skills.sh is add/update only, idempotent, and stays out o
   assert.match(body, /^#!\/usr\/bin\/env bash/m, "must be a bash script (set -euo pipefail convention)");
   assert.match(body, /set\s+-euo\s+pipefail/, "must set -euo pipefail like the other scripts");
 });
+
+test("pizza-eagle.service: no seccomp-implied NoNewPrivileges — the sudo drop must survive", () => {
+  // 2026-10-31 post-mortem: the 2026-10-27 red-team block made systemd
+  // install seccomp filters, which silently enables NoNewPrivileges on the
+  // listener process; every fork inherits the flag, `sudo -n -u
+  // pizza-eagle-inv` cannot exec setuid under it, and EVERY investigation
+  // ran in mode 3 (no isolation) for a full day with nothing alerting.
+  // The literal NoNewPrivileges/RestrictSUIDSGID lines were already removed
+  // by issue #5 — these are the options that imply the flag anyway.
+  // Box-verified 2026-10-31: ProtectSystem/ProtectHome/PrivateTmp/
+  // DeviceAllow/MemoryMax leave NNP off and the drop works under them.
+  const body = readFileSync(join(systemdDir, "pizza-eagle.service"), "utf8");
+  for (const opt of [
+    "ProtectClock",
+    "ProtectHostname",
+    "ProtectKernelTunables",
+    "ProtectKernelModules",
+    "ProtectKernelLogs",
+    "LockPersonality",
+    "SystemCallArchitectures",
+    "PrivateDevices",
+    "NoNewPrivileges",
+    "RestrictSUIDSGID",
+  ]) {
+    assert.doesNotMatch(
+      body,
+      new RegExp(`^${opt}=`, "m"),
+      `pizza-eagle.service sets ${opt}= — seccomp-filtering options imply ` +
+        "NoNewPrivileges, which breaks the investigation wrapper's sudo privilege " +
+        "drop and silently degrades every run to unisolated mode 3 " +
+        "(2026-10-31 regression)",
+    );
+  }
+  assert.match(
+    body,
+    /^DeviceAllow=char-fuse/m,
+    "DeviceAllow=char-fuse must stay — rootless podman (mode 1) needs /dev/fuse",
+  );
+});

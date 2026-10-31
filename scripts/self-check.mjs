@@ -152,6 +152,33 @@ await check("systemd units match repo", async () => {
   return true;
 });
 
+// 10. investigation privilege drop — the wrapper's mode-1/2 boundary.
+// 2026-10-31 post-mortem: the box ran EVERY investigation in mode 3
+// (unisolated — pi as the listener user, listener env readable) for a full
+// day because the unit's red-team seccomp options silently enabled
+// NoNewPrivileges and sudo cannot exec setuid under it — and nothing
+// alerted, because no probe existed. This check runs INSIDE the unit
+// (User=pizza-eagle), so it sees exactly what the listener's children
+// see: if the drop is broken here, every investigation is unisolated.
+await check("investigation drop (sudo -n -u inv)", async () => {
+  const invUser = env.INV_USER ?? "pizza-eagle-inv";
+  await sh("sudo", ["-n", "-u", invUser, "--", "true"]);
+  return true;
+});
+
+// 10b. mode-1 prerequisites (advisory — mode 2 is the accepted fallback):
+// missing podman or image means investigations run with a UID boundary but
+// no container. Not a page; visible in the digest so the mode-1 rollout
+// (container/Dockerfile + build-investigation-image.sh) doesn't rot silently.
+try {
+  const invUser = env.INV_USER ?? "pizza-eagle-inv";
+  await sh("sudo", ["-n", "-u", invUser, "--", "env", `HOME=/home/${invUser}`,
+    "podman", "image", "exists", env.INV_IMAGE ?? "pizza-eagle-investigation"]);
+  results.push(["✅", "mode 1 (podman) image", "present"]);
+} catch {
+  results.push(["⚠", "mode 1 (podman)", "unavailable — investigations run mode 2 (UID boundary, no container)"]);
+}
+
 // digest
 const icon = results.some(r => r[0] === "❌") ? ":rotating_light:" : ":white_check_mark:";
 const lines = results.map(([ok, name, why]) => `${ok} ${name}${why ? ` — \`${why}\`` : ""}`).join("\n");
