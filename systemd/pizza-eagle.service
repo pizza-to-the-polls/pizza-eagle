@@ -38,23 +38,25 @@ MemoryMax=1G
 # A compromised listener therefore still cannot escalate to root via sudo.
 PrivateTmp=true
 ProtectSystem=strict
-# 2026-10-27 red team hardening: the bot + its pi children never need
-# clocks, hostnames, kernel knobs, modules, or device nodes. Added alongside
-# the pre-existing ProtectSystem/ProtectHome — not a substitute for the
-# per-run sandbox follow-up (RUNBOOK) but closes ambient OS surfaces.
-ProtectClock=yes
-ProtectHostname=yes
-ProtectKernelTunables=yes
-ProtectKernelModules=yes
-ProtectKernelLogs=yes
-LockPersonality=yes
-PrivateDevices=yes
-# Rootless podman (investigation containers) needs /dev/fuse for its
-# overlay storage — PrivateDevices=yes alone would hide it and every mode-1
-# investigation would fall back to mode 2. DeviceAllow composes with
-# PrivateDevices (DevicePolicy=closed + allowlist).
+# 2026-10-31: the 2026-10-27 "red team" block (ProtectClock, ProtectHostname,
+# ProtectKernelTunables/Modules/Logs, LockPersonality, SystemCallArchitectures,
+# PrivateDevices) is REMOVED. Every one of those options makes systemd install
+# a seccomp filter, and systemd silently enables NoNewPrivileges whenever it
+# installs one. The listener then runs with NoNewPrivs: 1, every fork inherits
+# the flag — including the investigation wrapper's `sudo -n -u pizza-eagle-inv`
+# privilege drop — and sudo cannot exec setuid under NNP, so the drop failed
+# silently for EVERY investigation since the block landed and all box runs
+# executed in mode 3, unisolated (2026-10-31 #dev post-mortem: the "pi exited
+# with code 0" mode-3 self-check failure). Issue #5 removed the *literal*
+# NoNewPrivileges/RestrictSUIDSGID lines; the seccomp-implied enablement came
+# back with the red-team block. Box-verified: ProtectSystem/ProtectHome/
+# PrivateTmp/DeviceAllow/MemoryMax leave NNP off and the drop works under
+# them; the removed options do not. self-check.mjs probe 10 now asserts the
+# drop from inside this unit, so a regression pages instead of silently
+# degrading to mode 3.
+# DeviceAllow=char-fuse stays for the eventual mode-1 rollout (rootless podman
+# needs /dev/fuse for its overlay store) — inert without PrivateDevices.
 DeviceAllow=char-fuse
-SystemCallArchitectures=native
 # pi writes locks/state under ~/.pi/agent — the bot user's home must be
 # writable despite ProtectHome=read-only (ReadWritePaths overrides it).
 # /var/lib/pizza-eagle-inv: rootless podman's image store for the

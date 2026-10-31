@@ -30,7 +30,11 @@
 #                      rootfs, no capabilities, only the case workdir and a
 #                      per-run staged HOME are mounted
 #   mode 2 (no image): sudo -u pizza-eagle-inv pi …  — UID boundary only
-#                      (Option B level; used until the image is built)
+#                      (Option B level; used until the image is built).
+#                      The child gets the SAME per-run staged HOME as mode 1
+#                      (pi config + triage creds under PrivateTmp): the inv
+#                      user's own home is empty and read-only inside the
+#                      unit, so an unstaged drop cannot run pi at all.
 #   mode 3 (dev/CI):   pi directly as the current user — NO isolation;
 #                      acceptable on a laptop, but the box must never be
 #                      here: scripts/self-check.mjs probe 10 alerts when
@@ -122,8 +126,9 @@ can_drop() {
 # Env the isolated child gets. Enumerated explicitly (not inherited) so the
 # listener's full env can never ride along, whatever invokes this script.
 PASSTHROUGH_ENV=(OPENROUTER_KEY_EAGLE OPENROUTER_KEY_PIZZA GH_APP_ID GA_PROPERTY_ID ZAPIER_MCP_URL PI_MODEL)
+DROP_HOME="$INV_HOME"  # mode 2 overrides this with its staged HOME before run_dropped
 build_drop_env() {  # prints env(1) arguments: HOME, PATH, passthrough
-  printf 'HOME=%s\n' "$INV_HOME"
+  printf 'HOME=%s\n' "$DROP_HOME"
   printf 'PATH=%s\n' "${PATH:-/usr/local/bin:/usr/bin:/bin}"
   local v
   for v in "${PASSTHROUGH_ENV[@]}"; do
@@ -162,51 +167,57 @@ image_available() {
   fi
 }
 
-# ── Mode selection ─────────────────────────────────────────────────────────
-if command -v podman >/dev/null 2>&1 && can_drop && image_available; then
-  echo "run-investigation-container: mode 1 — podman container as $INV_USER (image $INV_IMAGE)" >&2
-
-  # Per-run staging of everything the child must read from the listener
-  # user's HOME. Lives in the listener's PrivateTmp, removed on exit; the
-  # inv user can never traverse /home/pizza-eagle (mode 700) directly, and
-  # nothing is copied into the case workdir — credentials must not land in
-  # state/ or its S3 backups.
-  STAGE="$(mktemp -d "${TMPDIR:-/tmp}/pizza-eagle-inv.XXXXXX")"
-  trap 'rm -rf "$STAGE"' EXIT
-  mkdir -p "$STAGE/home/.pi/agent" "$STAGE/home/.config/ptp" "$STAGE/home/.config/bugsnag"
+# Per-run staging of everything the child must read from the listener
+# user's HOME — shared by mode 1 (mounted into the container) and mode 2
+# (used as the dropped child's HOME). Lives in the listener's PrivateTmp,
+# removed on exit; the inv user can never traverse /home/pizza-eagle
+# (mode 700) directly, and nothing is copied into the case workdir —
+# credentials must not land in state/ or its S3 backups.
+stage_home() {  # stage_home <stage-root>
+  local stage="$1" f ga_src bugsnag_src
+  mkdir -p "$stage/home/.pi/agent" "$stage/home/.config/ptp" "$stage/home/.config/bugsnag"
 
   # pi provider/skill config (models.json carries no secrets — the model
   # key is env-keyed). Agnostic about whether PI_CODING_AGENT_DIR-style
   # paths are ~/.pi/agent or ~/.pi: both layouts materialize.
   for f in models.json settings.json; do
     if [[ -f "$PI_AGENT_DIR/$f" ]]; then
-      cp "$PI_AGENT_DIR/$f" "$STAGE/home/.pi/agent/$f"
-      mkdir -p "$STAGE/home/.pi/agent/agent"
-      cp "$PI_AGENT_DIR/$f" "$STAGE/home/.pi/agent/agent/$f"
+      cp "$PI_AGENT_DIR/$f" "$stage/home/.pi/agent/$f"
+      mkdir -p "$stage/home/.pi/agent/agent"
+      cp "$PI_AGENT_DIR/$f" "$stage/home/.pi/agent/agent/$f"
     fi
   done
   if [[ -d "$PI_AGENT_DIR/skills" ]]; then
-    cp -R "$PI_AGENT_DIR/skills" "$STAGE/home/.pi/agent/skills"
-    mkdir -p "$STAGE/home/.pi/agent/agent"
-    cp -R "$PI_AGENT_DIR/skills" "$STAGE/home/.pi/agent/agent/skills"
+    cp -R "$PI_AGENT_DIR/skills" "$stage/home/.pi/agent/skills"
+    mkdir -p "$stage/home/.pi/agent/agent"
+    cp -R "$PI_AGENT_DIR/skills" "$stage/home/.pi/agent/agent/skills"
   fi
 
   # Triage-read credentials, staged to the paths AGENTS.md documents
   # (~/.config/ptp/ga-readonly.json, ~/.config/bugsnag/readonly-token).
-  GA_SRC="${GA_SA_JSON:-${HOME:-}/.config/ptp/ga-readonly.json}"
-  if [[ -n "$GA_SRC" && -f "$GA_SRC" ]]; then
-    cp "$GA_SRC" "$STAGE/home/.config/ptp/ga-readonly.json"
+  ga_src="${GA_SA_JSON:-${HOME:-}/.config/ptp/ga-readonly.json}"
+  if [[ -n "$ga_src" && -f "$ga_src" ]]; then
+    cp "$ga_src" "$stage/home/.config/ptp/ga-readonly.json"
   fi
-  BUGSNAG_SRC="${BUGSNAG_TOKEN_PATH:-${HOME:-}/.config/bugsnag/readonly-token}"
-  if [[ -f "$BUGSNAG_SRC" ]]; then
-    cp "$BUGSNAG_SRC" "$STAGE/home/.config/bugsnag/readonly-token"
+  bugsnag_src="${BUGSNAG_TOKEN_PATH:-${HOME:-}/.config/bugsnag/readonly-token}"
+  if [[ -f "$bugsnag_src" ]]; then
+    cp "$bugsnag_src" "$stage/home/.config/bugsnag/readonly-token"
   fi
 
   # World-readable stage contents (the inv user / container must read
   # them); the stage HOME dir itself is writable — pi keeps runtime state
   # (locks, memory) under ~/.pi and it must survive inside the boundary.
-  chmod 0777 "$STAGE/home"
-  chmod -R a+rX "$STAGE/home/.pi" "$STAGE/home/.config"
+  chmod 0777 "$stage/home"
+  chmod -R a+rX "$stage/home/.pi" "$stage/home/.config"
+}
+
+# ── Mode selection ─────────────────────────────────────────────────────────
+if command -v podman >/dev/null 2>&1 && can_drop && image_available; then
+  echo "run-investigation-container: mode 1 — podman container as $INV_USER (image $INV_IMAGE)" >&2
+
+  STAGE="$(mktemp -d "${TMPDIR:-/tmp}/pizza-eagle-inv.XXXXXX")"
+  trap 'rm -rf "$STAGE"' EXIT
+  stage_home "$STAGE"
 
   # Helper scripts (gh-token.mjs, ga.mjs, publish-hotnready.sh) mounted
   # read-only at their documented absolute path so AGENTS.md instructions
@@ -243,6 +254,18 @@ if command -v podman >/dev/null 2>&1 && can_drop && image_available; then
 elif can_drop; then
   echo "run-investigation-container: mode 2 — direct pi as $INV_USER (podman/image unavailable: Option B level isolation)" >&2
   cd "$WORKDIR"
+  # 2026-10-31: this branch was unreachable on the box before today —
+  # can_drop() was false since the 2026-10-27 red-team unit options implied
+  # NoNewPrivileges and killed sudo — so its missing staging went unnoticed:
+  # an unstaged drop hands pi HOME=/home/pizza-eagle-inv, which is empty
+  # (no models.json/settings/skills, no triage creds) AND read-only inside
+  # the unit, so pi could never have run. Stage the same per-run HOME mode 1
+  # stages and point the drop at it: UID boundary + a writable, populated
+  # HOME, in the listener's PrivateTmp, cleaned up on exit.
+  STAGE="$(mktemp -d "${TMPDIR:-/tmp}/pizza-eagle-inv.XXXXXX")"
+  trap 'rm -rf "$STAGE"' EXIT
+  stage_home "$STAGE"
+  DROP_HOME="$STAGE/home"
   run_dropped "$PI_BIN" "${PI_ARGS[@]}"
 
 else
