@@ -13,10 +13,13 @@
  *   3. bot secrets readable             6. heartbeat metric fresh (<15 min)
  *   4. backup tarball fresh (<26h)      7. service active (this runs on the box)
  *                                       9. systemd units match the repo
+ *                                      10. investigation drop + session resume
+ *                                          across the uid boundary (10c)
  */
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { promisify } from "node:util";
 const sh = promisify(execFile);
 const AWS_REGION = "us-west-2";
@@ -178,6 +181,38 @@ try {
 } catch {
   results.push(["⚠", "mode 1 (podman)", "unavailable — investigations run mode 2 (UID boundary, no container)"]);
 }
+
+// 10c. session resume across the uid boundary (2026-10-31 post-mortem,
+// issue #54). The session id is stable per Slack thread, so every follow-up
+// RESUMES the same <workdir>/sessions/<file>; files written by the
+// pre-isolation mode-3 runs are listener-owned 0644, and without the
+// per-run repair (investigate.ts ensureCaseWorkdirPerms) the isolated
+// child cannot append them — every pre-boundary thread fails with EACCES
+// while new threads keep working. Probe: build the legacy layout, run the
+// DEPLOYED repair (dist/investigate.js), then assert the inv user can
+// append the file (group pizza-eagle — bootstrap.sh membership).
+await check("session resume across the uid boundary", async () => {
+  const invUser = env.INV_USER ?? "pizza-eagle-inv";
+  const stateRoot = env.BOT_STATE_DIR ?? "/opt/pizza-eagle/state";
+  const workRoot = join(stateRoot, "work");
+  mkdirSync(workRoot, { recursive: true });
+  const scratch = mkdtempSync(join(workRoot, ".selfcheck-"));
+  try {
+    mkdirSync(join(scratch, "sessions"), { recursive: true });
+    const legacy = join(
+      scratch, "sessions",
+      "2026-10-31T00-00-00-000Z_00000000-0000-4000-8000-000000000000.jsonl",
+    );
+    writeFileSync(legacy, "{}\n", { mode: 0o644 });
+    const { ensureCaseWorkdirPerms } = await import("../dist/investigate.js");
+    ensureCaseWorkdirPerms(scratch);
+    // The drop must be able to append the legacy file (group pizza-eagle).
+    await sh("sudo", ["-n", "-u", invUser, "--", "test", "-w", legacy]);
+    return true;
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
 
 // digest
 const icon = results.some(r => r[0] === "❌") ? ":rotating_light:" : ":white_check_mark:";

@@ -94,8 +94,21 @@ QUESTION="$3"
 # owner pizza-eagle, group pizza-eagle (pizza-eagle-inv is a member —
 # bootstrap.sh), mode 770. World-read drops off (was 755): only the bot
 # user + investigation user traverse it.
+#
+# 2026-10-31 (issue #54): the session id is stable per Slack thread, so the
+# child RESUMES the same sessions/<file> on every follow-up. Files written
+# before the uid boundary (the mode-3 era) are listener-owned 0644 — the
+# dropped child got EACCES appending them, so every pre-isolation thread
+# failed on its next reply. investigate.ts:ensureCaseWorkdirPerms() owns the
+# per-run repair (same two operations); this copy is defense in depth for
+# any other invoker: 2770 pins new files to group pizza-eagle (INV_USER is
+# a member — bootstrap.sh) whatever uid creates them, and g+rwX re-opens
+# legacy files for the drop. Best-effort on other-uid-owned files — their
+# owner can append them; RUNBOOK.md carries the root-side one-liner.
 mkdir -p "$WORKDIR/sessions"
-chmod 0770 "$WORKDIR" "$WORKDIR/sessions" 2>/dev/null || true
+chmod 0770 "$WORKDIR" 2>/dev/null || true
+chmod 2770 "$WORKDIR/sessions" 2>/dev/null || true
+chmod -R g+rwX "$WORKDIR/sessions" 2>/dev/null || true
 
 PI_ARGS=(
   --print

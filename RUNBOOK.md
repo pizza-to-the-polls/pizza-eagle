@@ -223,6 +223,23 @@ rotate `gh-app-key` (and the Slack tokens) and check `state/usage.jsonl`
 for unexpected `token-mint` entries. Durable fix = per-run IAM identity /
 sandbox (separate tracked work).
 
+### Pre-isolation session files (2026-10-31, issue #54)
+
+Every `<workdir>/sessions/*.jsonl` written before the uid boundary landed
+(#52/#53) is listener-owned `0644` — the isolated child could not RESUME
+it (EACCES), so every pre-isolation thread failed on its next reply.
+`investigate.ts:ensureCaseWorkdirPerms` repairs group rw per run now, and
+self-check probe 10c asserts the drop can append. Strays the listener
+cannot chmod (root-owned, from SSM verification runs) need the root-side
+one-liner:
+
+```bash
+sudo bash -c 'find /opt/pizza-eagle/state/work -path "*/sessions/*.jsonl" \
+  -exec chgrp pizza-eagle {} + -exec chmod 0664 {} +; \
+  find /opt/pizza-eagle/state/work -type d -name sessions \
+  -exec chgrp pizza-eagle {} + -exec chmod 2770 {} +'
+```
+
 ## Alert channels
 
 | What | Where |

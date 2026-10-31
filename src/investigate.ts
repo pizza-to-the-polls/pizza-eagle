@@ -26,7 +26,7 @@
  */
 
 import { spawn } from "node:child_process";
-import { appendFileSync, chmodSync, copyFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, copyFileSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Config } from "./config.js";
 
@@ -142,6 +142,44 @@ export function wrapperEnv(
   return out;
 }
 
+/**
+ * Per-run repair of the case workdir's session surface (2026-10-31
+ * post-mortem, issue #54). The session id is stable per Slack thread, so
+ * every follow-up RESUMES the same <workdir>/sessions/<file> — and every
+ * file written before the uid boundary landed (the 2026-10-27…31 mode-3
+ * era: pi ran as THIS listener user) is pizza-eagle-owned 0644. The
+ * isolated child (pizza-eagle-inv) then got EACCES appending it, so EVERY
+ * pre-isolation thread failed on its next reply while new threads kept
+ * working. Repair, as the listener (owner of the legacy files):
+ *   - sessions dir 2770: the setgid bit pins files created by EITHER uid
+ *     to group pizza-eagle (bootstrap.sh puts pizza-eagle-inv in it), so
+ *     resume-context keeps working across the boundary;
+ *   - existing *.jsonl: add group rw (0644 → 0664) so the child can append.
+ * Best-effort by design: files owned by other uids (inv-created, or
+ * root-created by SSM verification runs) cannot be chmod'd here — those
+ * are appendable by their owner; RUNBOOK.md carries the root-side
+ * one-liner for the rest. The wrapper (run-investigation-container.sh)
+ * mirrors both operations as defense in depth.
+ */
+export function ensureCaseWorkdirPerms(workdir: string): void {
+  const sessions = join(workdir, "sessions");
+  mkdirSync(sessions, { recursive: true });
+  try {
+    chmodSync(sessions, 0o2770);
+  } catch {
+    // Not our dir (root-owned) — RUNBOOK.md root-side repair.
+  }
+  for (const f of readdirSync(sessions)) {
+    if (!f.endsWith(".jsonl")) continue;
+    const p = join(sessions, f);
+    try {
+      chmodSync(p, statSync(p).mode | 0o660); // add group rw, keep the rest
+    } catch {
+      // Owned by another uid — its owner can append it already.
+    }
+  }
+}
+
 export async function runInvestigation(
   cfg: Config,
   opts: { question: string; sessionId: string; workdir: string; requester?: string; writeAllowed?: boolean },
@@ -163,6 +201,10 @@ export async function runInvestigation(
   // owner + group get rwx, world gets nothing. pi writes its session files
   // under <workdir>/sessions from inside the boundary.
   chmodSync(workdir, 0o770);
+  // Session-surface repair (issue #54): the isolated child RESUMES the
+  // thread's session file — legacy listener-owned 0644 files must be
+  // re-opened for it or every pre-isolation thread fails on its next reply.
+  ensureCaseWorkdirPerms(workdir);
 
   // Listener-owned per-run authorization record (see writeRequestAuth):
   // written BEFORE the run so the operator prompt and the helper scripts
