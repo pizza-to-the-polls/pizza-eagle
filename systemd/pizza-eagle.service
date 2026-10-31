@@ -21,6 +21,12 @@ StandardOutput=append:/var/log/pizza-eagle/bot.log
 StandardError=append:/var/log/pizza-eagle/bot.log
 Restart=always
 RestartSec=10
+# 2026-10-31: the eagle has oom-kill history on this box (Oct 24, 26, 31) —
+# on the 2GB t4g.small a ballooned bot triggered global OOM that took the
+# SSM agent down with it (Retool tunnel stranded until an EC2 reboot).
+# Cap the cgroup: systemd kills the unit here and Restart=always brings
+# it back. 1G ≈ 1.5× observed RSS peaks (187MB/243MB/688MB).
+MemoryMax=1G
 # Hardening. NOTE (issue #5): NoNewPrivileges and RestrictSUIDSGID were
 # REMOVED here — both block exec'ing setuid sudo, which the investigation
 # wrapper (scripts/run-investigation-container.sh) needs to drop each pi

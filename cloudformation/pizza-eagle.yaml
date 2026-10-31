@@ -17,7 +17,13 @@ Parameters:
     Description: Private subnet (SSM egress only; bot has no inbound)
   InstanceType:
     Type: String
-    Default: t4g.small
+    # 2026-10-31: t4g.small (2GB) OOM'd under election-night feedflag peak
+    # legs — global OOM killed the SSM agent + pizza-eagle and stranded the
+    # Retool tunnel until a manual EC2 reboot. t4g.medium (4GB, same arm64
+    # family) — a change here executes as an ASG-replacing update
+    # (AutoScalingReplacingUpdate below) and lands with a fresh user-data;
+    # re-run feedflag's ops/bastion/install.sh on the new box.
+    Default: t4g.medium
   KeyName:
     Type: String
     Default: ""
@@ -458,8 +464,35 @@ Resources:
       AlarmActions: [!Ref HeartbeatAlarmTopic]
       OKActions: [!Ref HeartbeatAlarmTopic]
 
+  OpsMemoryAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: pizza-eagle-memory-high
+      AlarmDescription: bastion memory >85% for 5 min — a ballooning leg paging before it can OOM the box (2026-10-31 incident class — feedflag peak leg OOM'd SSM agent + eagle, Retool tunnel stranded)
+      Namespace: pizza-eagle
+      MetricName: MemoryPercent
+      Period: 300
+      EvaluationPeriods: 1
+      Statistic: Average
+      ComparisonOperator: GreaterThanThreshold
+      Threshold: 85
+      # The bot's absence is HeartbeatAlarm's job; here missing = no
+      # signal, not a memory claim — don't double-page on bot death.
+      TreatMissingData: notBreaching
+      AlarmActions: [!Ref HeartbeatAlarmTopic]
+      OKActions: [!Ref HeartbeatAlarmTopic]
+
   OpsASG:
     Type: AWS::AutoScaling::AutoScalingGroup
+    # 2026-10-31: without an UpdatePolicy, launch-template changes (the
+    # t4g.medium resize) only affect NEW launches — the running instance
+    # keeps its old type until manually replaced. WillReplace makes
+    # template changes (type, AMI, user-data) roll the instance: CFN
+    # terminates, the ASG relaunches, user-data re-runs (EIP + DNS
+    # self-registration is in bootstrap). Brief single-instance downtime.
+    UpdatePolicy:
+      AutoScalingReplacingUpdate:
+        WillReplace: true
     Properties:
       MinSize: "1"
       MaxSize: "1"

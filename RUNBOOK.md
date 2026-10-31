@@ -6,6 +6,7 @@ One page. If Scott's unavailable, this keeps the bird flying.
 
 - **The #dev channel is the heartbeat** — pizza-eagle answers @mentions. If it's silent for >10 min, the alarm posts to `#dev`.
 - **Daily self-check**: runs at 09:00 Pacific, posts a digest to `#dev` **only if something fails** (silent when green).
+- **Memory pressure** (2026-10-31): `pizza-eagle-memory-high` (stack) pages when bastion memory is >85% for 5 min — the wedge class where a feedflag peak leg OOMs the box (SSM agent dies with it, Retool tunnel stranded). The eagle is also cgroup-capped (`MemoryMax=1G` in its unit; it has oom-kill history) and feedflag legs carry `TimeoutStartSec`/`MemoryMax` so a wedged leg self-recovers in ≤45 min.
 - **Off-box health check**: GitHub Actions runs daily at 09:00 Pacific (`.github/workflows/health.yml`), also silent when green.
 - **Quick manual check**: `ssh ptp-ops "systemctl is-active pizza-eagle; journalctl -u pizza-eagle -n 5"`
 - **Nightly update health**: `ssh ptp-ops "journalctl -u pizza-eagle-update -n 10 --no-pager"` — the
