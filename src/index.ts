@@ -10,6 +10,7 @@ import { SocketModeClient } from "@slack/socket-mode";
 import { WebClient } from "@slack/web-api";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";  // mkdir: thread-context writes precede runInvestigation's own mkdir
 import { execFile } from "node:child_process";
+import { freemem, totalmem } from "node:os";
 import { join } from "node:path";
 import { appendUsage, withinDailyCap } from "./usage.js";
 import { evaluateSuspicion, WRITE_GATE } from "./suspicion.js";
@@ -331,12 +332,20 @@ async function main(): Promise<void> {
 
   // Liveness heartbeat: one CloudWatch datapoint every 5 minutes so an
   // alarm on absence (stack: HeartbeatAlarm) catches a silently-dead
-  // process or hung socket — "systemd active" alone can lie.
+  // process or hung socket — "systemd active" alone can lie. The same
+  // call carries MemoryPercent (stack: OpsMemoryAlarm): on 2026-10-31 an
+  // election-night feedflag leg OOM'd the whole box (SSM agent + eagle
+  // dead, Retool tunnel stranded) with no memory signal anywhere — this
+  // pages at 85% before the OOM, and it rides the existing
+  // HeartbeatAlarmTopic → #dev plumbing with no instance dimension, so
+  // it survives ASG replacement.
   const heartbeat = setInterval(() => {
+    const memPct = Math.round(100 * (1 - freemem() / totalmem()));
     execFile("aws", [
       "cloudwatch", "put-metric-data",
       "--namespace", "pizza-eagle",
       "--metric-data", "MetricName=Heartbeat,Value=1",
+      "--metric-data", `MetricName=MemoryPercent,Value=${memPct}`,
       "--region", "us-west-2",
     ], (e) => {
       if (e) console.warn("[pizza-eagle] heartbeat emit failed (will retry):", (e as Error).message);
