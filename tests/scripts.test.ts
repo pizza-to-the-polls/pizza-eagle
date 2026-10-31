@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { createSign, createVerify, generateKeyPairSync } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -364,6 +364,54 @@ test("twilio-lookup errorCodeMeaning: known codes translated, 0/unknown pass thr
   assert.equal(errorCodeMeaning(0), null, "0 is success, not an error");
   assert.equal(errorCodeMeaning(null), null);
   assert.match(errorCodeMeaning("99999")!, /99999/);
+});
+
+test("run-investigation-container.sh: repairs pre-isolation session perms before the drop (issue #54)", () => {
+  // Defense in depth behind investigate.ts:ensureCaseWorkdirPerms — the
+  // wrapper re-opens legacy (listener-owned 0644) session files for the
+  // dropped user and pins the sessions dir setgid so new files land in
+  // group pizza-eagle whatever uid creates them. Mode 3 (INV_USER points
+  // at a missing user → no drop) exercises the same repair lines as the
+  // box modes; PI_BIN=/bin/true keeps pi itself out of the test.
+  const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const script = join(repoRoot, "scripts", "run-investigation-container.sh");
+  const tmp = mkdtempSync(join(tmpdir(), "pe-wrap-perms-"));
+  try {
+    mkdirSync(join(tmp, "sessions"), { recursive: true });
+    const legacy = join(
+      tmp, "sessions",
+      "2026-10-31T00-00-00-000Z_00000000-0000-4000-8000-000000000000.jsonl",
+    );
+    writeFileSync(legacy, "{}\n");
+    chmodSync(legacy, 0o644); // exact pre-isolation mode, umask-proof
+
+    const r = spawnSync(
+      "bash",
+      [script, tmp, "11111111-1111-4111-8111-111111111111", "probe"],
+      {
+        cwd: tmp,
+        env: {
+          ...process.env,
+          PI_BIN: spawnSync("bash", ["-c", "command -v true"], { encoding: "utf8" }).stdout.trim(),
+          INV_USER: "no-such-inv-user",
+          PI_AGENT_DIR: join(tmp, "no-agent-dir"),
+        },
+        encoding: "utf8",
+      },
+    );
+    assert.equal(r.status, 0, `wrapper failed: ${r.stderr}`);
+    assert.match(r.stderr, /mode 3 — NO ISOLATION/, "expected the mode-3 fallback");
+    assert.equal(
+      statSync(join(tmp, "sessions")).mode & 0o7777, 0o2770,
+      "sessions dir must be setgid 2770",
+    );
+    assert.equal(
+      statSync(legacy).mode & 0o777, 0o664,
+      "legacy 0644 session file must gain group rw for the dropped user",
+    );
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test("install-skills.sh: installs new skills, no-ops on identical, re-installs on change, never deletes orphans", () => {

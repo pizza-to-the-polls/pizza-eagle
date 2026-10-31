@@ -4,9 +4,12 @@ import { spawnSync } from "node:child_process";
 import {
   chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
+  rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,6 +19,7 @@ import {
   InvestigationError,
   MAX_QUESTION_CHARS,
   closeHistory,
+  ensureCaseWorkdirPerms,
   openHistory,
   runInvestigation,
   validateRunInputs,
@@ -160,6 +164,48 @@ test("validateRunInputs: question exceeding the 32k argv cap is rejected", () =>
   );
   // Exactly at the cap passes — the check is `>`, not `>=`.
   validateRunInputs({ question: "x".repeat(MAX_QUESTION_CHARS), sessionId: SESSION_ID });
+});
+
+test("ensureCaseWorkdirPerms: re-opens pre-isolation session files for the uid boundary (issue #54)", () => {
+  // Post-mortem 2026-10-31: session ids are stable per Slack thread, so pi
+  // RESUMES the same <workdir>/sessions/<file> on every follow-up. Session
+  // files written before the uid boundary (the mode-3 era: pi as the
+  // listener user) are listener-owned 0644 — the isolated child
+  // (pizza-eagle-inv) got EACCES appending them, so every pre-isolation
+  // thread failed on its next reply while new threads kept working. The
+  // repair: setgid sessions dir (new files pinned to group pizza-eagle
+  // whatever uid creates them) + group rw on existing session files.
+  const tmp = mkdtempSync(join(tmpdir(), "pe-perms-"));
+  try {
+    mkdirSync(join(tmp, "sessions"), { recursive: true });
+    const legacy = join(
+      tmp, "sessions",
+      "2026-10-31T00-00-00-000Z_00000000-0000-4000-8000-000000000000.jsonl",
+    );
+    writeFileSync(legacy, "{}\n");
+    chmodSync(legacy, 0o644); // exact pre-isolation mode, umask-proof
+    // Non-session files in sessions/ stay untouched.
+    const bystander = join(tmp, "sessions", "notes.txt");
+    writeFileSync(bystander, "x");
+    chmodSync(bystander, 0o600);
+
+    ensureCaseWorkdirPerms(tmp);
+
+    assert.equal(
+      statSync(join(tmp, "sessions")).mode & 0o7777, 0o2770,
+      "sessions dir must be setgid 2770 — new files pinned to group pizza-eagle",
+    );
+    assert.equal(
+      statSync(legacy).mode & 0o777, 0o664,
+      "legacy 0644 session file must gain group rw (the inv user appends it)",
+    );
+    assert.equal(
+      statSync(bystander).mode & 0o777, 0o600,
+      "non-.jsonl files stay untouched",
+    );
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });
 
 test("wrapper: question rides as the sole positional after `--`", () => {
