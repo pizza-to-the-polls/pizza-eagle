@@ -180,7 +180,9 @@ stage_home() {  # stage_home <stage-root>
   # pi provider/skill config (models.json carries no secrets — the model
   # key is env-keyed). Agnostic about whether PI_CODING_AGENT_DIR-style
   # paths are ~/.pi/agent or ~/.pi: both layouts materialize.
-  for f in models.json settings.json; do
+  # mcp.json rides along (server config — zapier MCP url is env-keyed via
+  # ZAPIER_MCP_URL): parity with how the listener-side pi resolves servers.
+  for f in models.json settings.json mcp.json; do
     if [[ -f "$PI_AGENT_DIR/$f" ]]; then
       cp "$PI_AGENT_DIR/$f" "$stage/home/.pi/agent/$f"
       mkdir -p "$stage/home/.pi/agent/agent"
@@ -204,11 +206,20 @@ stage_home() {  # stage_home <stage-root>
     cp "$bugsnag_src" "$stage/home/.config/bugsnag/readonly-token"
   fi
 
-  # World-readable stage contents (the inv user / container must read
-  # them); the stage HOME dir itself is writable — pi keeps runtime state
-  # (locks, memory) under ~/.pi and it must survive inside the boundary.
+  # Permissions, in traversal order for the inv user (defaults would lock
+  # it out — found while landing mode 2):
+  #   - the mktemp stage root is 0700 pizza-eagle: the inv user (mode 2) and
+  #     rootless podman (mode 1 bind mount) cannot even traverse INTO it, so
+  #     pi read zero config and answered "No API key found for the selected
+  #     model" off its compiled defaults. 0711: traverse-only.
+  #   - stage HOME is writable: pi keeps runtime state (locks, memory) under
+  #     ~/.pi and it must survive inside the boundary.
+  #   - the staged .pi tree is writable for the same reason (lock files).
+  #   - staged triage creds under .config stay read-only.
+  chmod 0711 "$stage"
   chmod 0777 "$stage/home"
-  chmod -R a+rX "$stage/home/.pi" "$stage/home/.config"
+  chmod -R a+rwX "$stage/home/.pi"
+  chmod -R a+rX "$stage/home/.config"
 }
 
 # ── Mode selection ─────────────────────────────────────────────────────────
