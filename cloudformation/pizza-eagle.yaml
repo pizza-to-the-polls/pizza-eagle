@@ -171,11 +171,19 @@ Resources:
                 Resource: !Sub arn:aws:secretsmanager:us-west-2:320802729995:secret:PizzaBaseReadOnly-*
               - Sid: EipAssociate # user-data self-associates the stack's EIP
                 Effect: Allow
-                # 2026-10-27 red team: scoped to THIS stack's allocation — was
-                # `*`, which let any code on the box re-associate any EIP.
+                # 2026-10-27 red team wanted this scoped to THIS stack's
+                # allocation. Found live 2026-10-31 (t4g.medium rebirth):
+                # AssociateAddress is ALSO evaluated against the association
+                # TARGET — the instance ARN. An ASG-launched instance ID is
+                # unknowable at template time, and `instance/*` scoping is
+                # account-wide anyway, so the action cannot be scoped below
+                # `*`. The scoped grant denied bootstrap at its EIP step
+                # (EIP stranded, Retool tunnel dead) until this landed.
+                # Residual risk accepted: code on the box can move any EIP in
+                # the account. Mitigate at the boundary (the box is
+                # single-purpose, no untrusted code) — not with IAM here.
                 Action: [ec2:AssociateAddress]
-                Resource:
-                  - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:elastic-ip/${OpsElasticIP.AllocationId}
+                Resource: ["*"]
               - Sid: EipDescribe # bootstrap reads back the public IP
                 Effect: Allow
                 # DescribeAddresses is a LIST call — it does not support
@@ -196,11 +204,15 @@ Resources:
                 # polls.pizza or mail MX at will. Condition keys pin it to
                 # exactly what bootstrap does: one A-record UPSERT for
                 # bastion.polls.pizza. Mixed change batches won't match → deny.
+                # NB (2026-10-31, found live): Route 53 NORMALIZES names with a
+                # trailing dot — the key value is "bastion.polls.pizza.",
+                # so the dotless form denied bootstrap's own upsert until
+                # the dot landed here.
                 Condition:
                   StringEquals:
                     route53:ChangeResourceRecordSetsActions: [UPSERT]
                     route53:ChangeResourceRecordSetsRecordTypes: [A]
-                    route53:ChangeResourceRecordSetsNormalizedNames: [bastion.polls.pizza]
+                    route53:ChangeResourceRecordSetsNormalizedNames: ["bastion.polls.pizza."]
               # Nightly tar of state/ (sessions + case history). Grant exists
               # ONLY when BackupBucketName is set — the empty-string default
               # must not widen to a malformed s3:::/* resource.
