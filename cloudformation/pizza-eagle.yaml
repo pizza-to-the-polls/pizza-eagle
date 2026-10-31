@@ -169,13 +169,24 @@ Resources:
                 Effect: Allow
                 Action: [secretsmanager:GetSecretValue]
                 Resource: !Sub arn:aws:secretsmanager:us-west-2:320802729995:secret:PizzaBaseReadOnly-*
-              - Sid: EipAssociate # user-data self-associates the EIP
+              - Sid: EipAssociate # user-data self-associates the stack's EIP
                 Effect: Allow
-                Action: [ec2:AssociateAddress, ec2:DescribeAddresses]
                 # 2026-10-27 red team: scoped to THIS stack's allocation — was
                 # `*`, which let any code on the box re-associate any EIP.
+                Action: [ec2:AssociateAddress]
                 Resource:
                   - !Sub arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:elastic-ip/${OpsElasticIP.AllocationId}
+              - Sid: EipDescribe # bootstrap reads back the public IP
+                Effect: Allow
+                # DescribeAddresses is a LIST call — it does not support
+                # resource-level grants, so the allocation-ARN scoping in the
+                # 2026-10-27 red-team pass silently denied it. Found
+                # 2026-10-31: the t4g.medium rebirth's bootstrap died right
+                # at this step (EIP left unassociated, Retool tunnel dead)
+                # because the Oct-24 box predated the scoping. Read-only and
+                # there is exactly one allocation to see — allow on `*`.
+                Action: [ec2:DescribeAddresses]
+                Resource: ["*"]
               - Sid: DnsUpsert # user-data upserts the bastion A record
                 Effect: Allow
                 Action: [route53:ChangeResourceRecordSets]
