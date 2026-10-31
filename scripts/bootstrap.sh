@@ -174,7 +174,14 @@ fi
 sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
 systemctl reload sshd || systemctl reload sshd.service || true
 
-#### 8. EIP + DNS self-registration (box identity survives instance refresh)
+#### 8. EIP self-association (box identity survives instance refresh)
+# DNS (2026-10-31): bastion.polls.pizza is NO LONGER upserted here — it is
+# the stack-owned BastionDnsRecord (AWS::Route53::RecordSet) driven by the
+# EIP's PublicIp. The old BotRole DnsUpsert grant (Condition keys
+# route53:ChangeResourceRecordSets*) never matched — Route 53 does not
+# populate those context keys for this API (probed live) — so this upsert
+# was denied on the 2026-10-31 t4g.medium rebirth and killed every bootstrap
+# mid-run. CFN keeps DNS correct on its own; the box has no route53 at all.
 if [[ -z "$EIP_ALLOCATION_ID" || "$EIP_ALLOCATION_ID" == TODO* ]]; then
   echo "FATAL: EIP_ALLOCATION_ID unset — bootstrap.env not written by UserData?" >&2
   exit 1
@@ -185,10 +192,6 @@ INSTANCE_ID=$(curl -s -H 'X-aws-ec2-metadata-token: '$(
   http://169.254.169.254/latest/meta-data/instance-id)
 aws ec2 associate-address --instance-id "$INSTANCE_ID" \
   --allocation-id "$EIP_ALLOCATION_ID" --allow-reassociation || true
-PUBLIC_IP=$(aws ec2 describe-addresses --allocation-ids "$EIP_ALLOCATION_ID" \
-  --query 'Addresses[0].PublicIp' --output text)
-aws route53 change-resource-record-sets --hosted-zone-id "$DNS_ZONE_ID" \
-  --change-batch '{"Changes":[{"Action":"UPSERT","ResourceRecordSet":{"Name":"'"$DNS_NAME"'","Type":"A","TTL":60,"ResourceRecords":[{"Value":"'"$PUBLIC_IP"'"}]}}]}'
 
 #### 9. Services
 # notify-failure@ must be present before any OnFailure= reference resolves.

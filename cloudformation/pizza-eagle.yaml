@@ -195,24 +195,16 @@ Resources:
                 # there is exactly one allocation to see — allow on `*`.
                 Action: [ec2:DescribeAddresses]
                 Resource: ["*"]
-              - Sid: DnsUpsert # user-data upserts the bastion A record
-                Effect: Allow
-                Action: [route53:ChangeResourceRecordSets]
-                Resource: !Sub arn:aws:route53:::hostedzone/${DnsHostedZoneId}
-                # 2026-10-27 red team: this was zone-wide UPSERT/CREATE/DELETE
-                # on any record type — a steered investigation could repoint
-                # polls.pizza or mail MX at will. Condition keys pin it to
-                # exactly what bootstrap does: one A-record UPSERT for
-                # bastion.polls.pizza. Mixed change batches won't match → deny.
-                # NB (2026-10-31, found live): Route 53 NORMALIZES names with a
-                # trailing dot — the key value is "bastion.polls.pizza.",
-                # so the dotless form denied bootstrap's own upsert until
-                # the dot landed here.
-                Condition:
-                  StringEquals:
-                    route53:ChangeResourceRecordSetsActions: [UPSERT]
-                    route53:ChangeResourceRecordSetsRecordTypes: [A]
-                    route53:ChangeResourceRecordSetsNormalizedNames: ["bastion.polls.pizza."]
+              # DNS is NOT granted to the box: bastion.polls.pizza is a
+              # stack-owned AWS::Route53::RecordSet (BastionDnsRecord) driven by
+              # the EIP's PublicIp attribute — CFN keeps it correct on every
+              # rebirth; no code on the box can touch the zone. (2026-10-31:
+              # the 2026-10-27 DnsUpsert condition-keys statement never
+              # matched — Route 53 does not populate the
+              # route53:ChangeResourceRecordSets* context keys for this API —
+              # so bootstrap's own upsert was denied on the t4g.medium
+              # rebirth, stranding DNS updates and killing the bootstrap
+              # mid-run. See also EipAssociate/EipDescribe Sids.)
               # Nightly tar of state/ (sessions + case history). Grant exists
               # ONLY when BackupBucketName is set — the empty-string default
               # must not widen to a malformed s3:::/* resource.
@@ -237,6 +229,23 @@ Resources:
     Type: AWS::EC2::EIP
     Properties:
       Domain: vpc # attached by user-data; box has no other public identity
+
+  # bastion.polls.pizza A record, stack-owned. The box used to upsert this
+  # itself (bootstrap step 8) under BotRole — but the 2026-10-27 red-team
+  # Condition keys (route53:ChangeResourceRecordSets*) never match: Route 53
+  # does not populate them for this API (probed live 2026-10-31 — every
+  # Condition variant denied, unconditional allowed). CFN owns the record
+  # instead: driven by the stack EIP's PublicIp, correct on every rebirth,
+  # and NO code on the box can write the zone at all. CI deploys need
+  # DeployRole Sid DnsRecordDeploy (below).
+  BastionDnsRecord:
+    Type: AWS::Route53::RecordSet
+    Properties:
+      HostedZoneId: !Ref DnsHostedZoneId
+      Name: bastion.polls.pizza
+      Type: A
+      TTL: 60
+      ResourceRecords: [!GetAtt OpsElasticIP.PublicIp]
 
   OpsSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -341,6 +350,15 @@ Resources:
                    cloudformation:DescribeStackEvents, cloudformation:ExecuteChangeSet,
                    cloudformation:ListChangeSets, cloudformation:GetTemplateSummary]
                 Resource: [!Sub arn:aws:cloudformation:us-west-2:320802729995:stack/pizza-eagle/*]
+              # CFN manages BastionDnsRecord (2026-10-31, replaced the box's
+              # own bootstrap upsert — see that resource's comment): deploys
+              # call route53 under the DEPLOYER's identity, i.e. this role in
+              # CI. Zone-scoped change+read; no condition keys (they never
+              # populate for ChangeResourceRecordSets).
+              - Sid: DnsRecordDeploy
+                Effect: Allow
+                Action: [route53:ChangeResourceRecordSets, route53:GetHostedZone]
+                Resource: !Sub arn:aws:route53:::hostedzone/${DnsHostedZoneId}
               - Sid: SsmUpdateAgent
                 Effect: Allow
                 Action: [ssm:SendCommand, ssm:DescribeCommand, ssm:ListCommands, ssm:CancelCommand]
