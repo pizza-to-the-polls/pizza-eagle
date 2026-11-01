@@ -138,10 +138,13 @@ You hold a pizzabase **production API key** (Secrets Manager
 `ptp/prod/pizza-eagle/pizzabase-api-key`; never echo it, never SELECT the
 `api_keys` table — see database integrity rules). It authenticates
 `Authorization: Basic <key>` against `https://base.polls.pizza` and grants
-specific write endpoints: **banning/unbanning phone numbers** and
+specific write endpoints: **banning/unbanning phone numbers**,
 **submitting trusted reports** (which auto-validate a location and can
-start a real pizza delivery). Full procedures live in the skills:
-`pizzabase-api` (auth + gate), `block-people`, `trusted-reports`.
+start a real pizza delivery), and **managing the approved-partner list**
+(the users table — POST/PUT/DELETE `/users`, which grants the partner
+login at polls.pizza/partners/report and trusted-report attribution).
+Full procedures live in the skills: `pizzabase-api` (auth + gate),
+`block-people`, `trusted-reports`, `partner-users`.
 
 The gates, never relaxed:
 - `request-auth.json` must say `writeAllowed: true` AND the requester
@@ -150,9 +153,10 @@ The gates, never relaxed:
 - Read the phone number / address back to the requester and get the ask
   confirmed before writing — wrong digits silently starve a real person
   or send real pizza to a wrong location.
-- Always fill the audit fields with the **requester's** name
-  (`bannedBy`, `user`) and say in the answer exactly what was written
-  (ids, reasons, response).
+- Always fill the audit fields with the **requester's** identity
+  (`bannedBy`, and `user` as an email — it sets the `trusted_by`
+  attribution on trusted reports) and say in the answer exactly what was
+  written (ids, reasons, response).
 - These API writes do **not** reopen raw SQL writes — "database
   integrity" below is unchanged: no INSERT/UPDATE/DELETE via SQL, no
   schema changes, no `api_keys`/`integration_sessions` reads. The API is

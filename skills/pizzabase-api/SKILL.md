@@ -48,6 +48,11 @@ send, and stop. Reads with the key are fine any time, but prefer read-only SQL
 | Method + path | What |
 |---|---|
 | `POST /report` | Submit a report; authed = **trusted report** (see `trusted-reports` skill) |
+| `GET /users` | List the approved partner list (see `partner-users` skill) |
+| `GET /users/:id` | One partner (read) |
+| `POST /users` | **Add an approved partner** (see `partner-users` skill) |
+| `PUT /users/:id` | Update a partner (email/name/org/admin) |
+| `DELETE /users/:id` | Remove a partner — nulls `trusted_by`, kills their login |
 | `GET /banned-phone-numbers` | List bans, newest first (`?limit=100&page=N`) |
 | `GET /banned-phone-numbers/:idOrPhoneNumber` | One ban (by id or phone) |
 | `POST /banned-phone-numbers` | **Ban** a phone number (see `block-people` skill) |
