@@ -34,7 +34,7 @@ curl -s -X POST -H "Authorization: Basic $PIZZABASE_KEY" \
     "contactRole": "Poll Worker",
     "waitTime": "45 minutes",
     "canDistribute": true,
-    "user": "Nina Martinez"
+    "user": "nina@polls.pizza"
   }' \
   https://base.polls.pizza/report
 ```
@@ -50,7 +50,7 @@ Body fields (all optional except `address` — authed defaults fill the rest):
 | `canDistribute` | Boolean — is distribution allowed at this location |
 | `addressOverride` | Authed-only: force the normalized address when geocoding misfires |
 | `uploadId` | Link an existing media upload |
-| `user` | **Always pass this** — the vouching admin's Slack name. Lands in the Action log and the location's `validated` Action |
+| `user` | **Always pass this** — an **email**: the vouching admin's or the partner's. Sets `reports.trusted_by` (the users-table FK) when it matches a partner row, and lands in the Action log + the location's `validated` Action either way. Filing for a partner? Pass *their* email (add them first via the `partner-users` skill if they're not on the list) |
 
 Response: `{address, hasTruck, willReceive, alreadyOrdered}` —
 
@@ -65,6 +65,11 @@ Response: `{address, hasTruck, willReceive, alreadyOrdered}` —
 - One report per ask; never bulk-submit.
 - After submitting, quote the response fields and say the location is now
   validated (who vouched, per the `user` field).
+- **No photo needed.** Omit `url`/`uploadId` and the report persists a
+  Street View proxy permalink (`/reports/:id/streetview`) as its public
+  URL — feedbot never attaches it to social (text-only posts), so a
+  trusted report never needs media to file. Omit anything you don't
+  know; the backend autofills (contact defaults, "Trusted" role).
 - If the phone number in `contact` is banned, the API still records the
   report data but returns all-false willReceive — say so rather than
   retrying.

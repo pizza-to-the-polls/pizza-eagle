@@ -234,9 +234,9 @@ test("dispatch skill: PII checklist and template agree with the AGENTS.md never-
 
 /**
  * The pizzabase admin API skills (block-people, trusted-reports,
- * pizzabase-api) carry the write-gate contract: the key comes from
- * Secrets Manager, writes require writeAllowed + an explicit ask, and
- * the audit fields carry the requester's name. AGENTS.md's
+ * partner-users, pizzabase-api) carry the write-gate contract: the key
+ * comes from Secrets Manager, writes require writeAllowed + an explicit
+ * ask, and the audit fields carry the requester's identity. AGENTS.md's
  * "Pizzabase admin API writes" section must stay in sync with them.
  */
 const SKILL_FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n/;
@@ -253,16 +253,19 @@ const skill = (name: string) =>
   readFileSync(join(repoRoot, "skills", name, "SKILL.md"), "utf8");
 
 test("pizzabase-api skills: frontmatter + the key comes from Secrets Manager, never the table", () => {
-  for (const name of ["pizzabase-api", "block-people", "trusted-reports"]) {
+  for (const name of [
+    "pizzabase-api",
+    "block-people",
+    "trusted-reports",
+    "partner-users",
+  ]) {
     const meta = parseFrontmatter(skill(name));
     assert.equal(meta["name"], name, `${name}: frontmatter name must match dir`);
     assert.match(
       String(meta["description"] ?? ""),
-      /pizzabase|ban|trusted/i,
+      /pizzabase|ban|trusted|partner/i,
       `${name}: description must describe discovery triggers`,
     );
-  }
-  for (const name of ["pizzabase-api", "block-people", "trusted-reports"]) {
     assert.match(
       skill(name),
       /ptp\/prod\/pizza-eagle\/pizzabase-api-key/,
@@ -274,6 +277,17 @@ test("pizzabase-api skills: frontmatter + the key comes from Secrets Manager, ne
       `${name}: must state the writeAllowed gate`,
     );
   }
+});
+
+test("partner-users skill: the users-table contract", () => {
+  const md = skill("partner-users");
+  // Partner additions need the person's name/org ask, and removal's
+  // SET-NULL + session-revocation effects must be spelled out.
+  assert.match(md, /partner list/, "must name what the users table is");
+  assert.match(md, /POST https:\/\/base\.polls\.pizza\/users/, "must name the add endpoint");
+  assert.match(md, /admin.*false/is, "must say partners are admin: false");
+  assert.match(md, /ON DELETE SET\s+NULL/, "must state the removal attribution effect");
+  assert.match(md, /polls\.pizza\/partners\/report/, "must name the partner login page");
 });
 
 test("agent/AGENTS.md: pizzabase API writes section stays in sync with the skills", () => {
