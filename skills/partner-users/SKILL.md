@@ -42,9 +42,16 @@ curl -s -X POST https://base.polls.pizza/users \
 - `email` required (unique, normalized to lowercase); `firstName` /
   `organization` optional; `admin` **only** for the PTP team itself —
   partners are `admin: false`.
-- 201 response = the created user row. Tell the admin the person can now
-  sign in at `polls.pizza/partners/report` with that email (magic link,
-  valid 24h per request).
+- 201 response = the created user row **plus a welcome email goes out
+  automatically** (from partners@polls.pizza): what trusted submission
+  means, the sign-in page, the no-password flow. Tell the admin the
+  person got a welcome email and can sign in at
+  `polls.pizza/partners/report` with that email (magic link, valid 24h
+  per request).
+- `welcomeEmailSent: false` in the 201 = the user was created (their
+  access works) but Mailgun failed — say so plainly and give the admin
+  the page URL to pass along manually. Never retry the create (the row
+  exists; a retry 422s on the duplicate email).
 - 422 with "already has a user (id N)" = they're already on the list —
   say so with the id, never retry.
 
