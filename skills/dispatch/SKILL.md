@@ -63,10 +63,17 @@ no requester identity, no Slack prose, no verbatim thread text.}
 ## Test expectations
 - {What passing looks like: CI checks, a manual verification step, or a
   regression test to add.}
+
+## Slack thread
+{The `Slack thread:` header line of `thread-context.md`, verbatim — e.g.
+https://pizzatothepolls.slack.com/archives/C1234ABCD/p1729562400123456.
+PTP-workspace-members-only link back to the thread that asked for this
+work. If `thread-context.md` is missing, omit the section.}
 ```
 
 Write it like a blog post — a stranger reading the repo should understand
-the ask with no Slack context.
+the ask with no Slack context. The deeplink is provenance for PTP members
+(traceability back to the ask), not context the issue depends on.
 
 ## 4. PII checklist — NEVER VIOLATED (verify before creating EVERY issue)
 
@@ -83,7 +90,10 @@ running `gh issue create`, re-read the drafted body and confirm every box:
       no "Scott asked for this", no Slack member ids, no @-handles. The
       de facto author line is "via pizza-eagle dispatch".
 - [ ] **No `thread-context.md` verbatim** — summarize only what's relevant
-      to the change.
+      to the change. The header line is the exception: the `Slack thread:`
+      deeplink (channel + timestamp, listener-written from authenticated
+      metadata) goes in the body so PTP members can trace the issue back to
+      the ask. Everything else Slack stays out.
 - [ ] **No raw bucket paths** — `raw-prod.polls.pizza/...` never appears;
       use CDN paths (`media.polls.pizza/...`) where a path is needed.
 - [ ] **No presigned URLs** — they're credentials; never, in any form.

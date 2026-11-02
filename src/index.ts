@@ -22,7 +22,7 @@ import { loadConfig } from "./config.js";
 import type { Config } from "./config.js";
 import { ThreadStore, workdirFor, type ThreadRecord } from "./store.js";
 import Bugsnag from "@bugsnag/js";
-import { editStatus, fetchThreadContext, postFindings, postStatus, react, stripMention } from "./slack.js";
+import { editStatus, fetchThreadContext, postFindings, postStatus, react, stripMention, threadContextDoc, threadDeeplink } from "./slack.js";
 import { InvestigationError, runInvestigation, activeInvestigations } from "./investigate.js";
 import { downloadAttachments, type SlackFile } from "./attachments.js";
 import { RunQueue, QueueFullError } from "./queue.js";
@@ -59,7 +59,7 @@ async function alertSuspicious(
 ): Promise<void> {
   const alertChannel = process.env.SLACK_ALERT_CHANNEL;
   if (!alertChannel) return;
-  const permalink = `https://pizzatothepolls.slack.com/archives/${event.channel}/p${event.ts.replace(".", "")}`;
+  const permalink = threadDeeplink(event.channel, event.ts);
   try {
     await slack.chat.postMessage({
       channel: alertChannel,
@@ -215,15 +215,20 @@ async function main(): Promise<void> {
       // never ships one to S3.)
       const attachmentPaths: string[] = [];
       try {
-        if (threadContext) {
-          // refresh on every run so follow-ups see the newest replies.
-          // mkdir first: a thread reply can be the FIRST mention of a case
-          // (e.g. replying to the self-check digest) — the workdir doesn't
-          // exist until runInvestigation creates it, and writeFileSync
-          // cannot create parents (ENOENT crash, found in the wild).
-          mkdirSync(record.workdir, { recursive: true });
-          writeFileSync(join(record.workdir, "thread-context.md"), threadContext + "\n");
-        }
+        // Refreshed on every run so follow-ups see the newest replies. Written
+        // even when the thread has no replies yet: the first line is the
+        // listener-written Slack thread deeplink (trusted authenticated
+        // metadata — like request-auth.json, a question cannot forge it)
+        // that dispatch issues quote back into their bodies.
+        // mkdir first: a thread reply can be the FIRST mention of a case
+        // (e.g. replying to the self-check digest) — the workdir doesn't
+        // exist until runInvestigation creates it, and writeFileSync
+        // cannot create parents (ENOENT crash, found in the wild).
+        mkdirSync(record.workdir, { recursive: true });
+        writeFileSync(
+          join(record.workdir, "thread-context.md"),
+          threadContextDoc(event.channel, threadTs, threadContext),
+        );
         // Vision runs (issue #34): download Slack files into the case workdir
         // and reference them as @file … in the question. Best-effort — a
         // failed download skips the file and the run proceeds text-only.

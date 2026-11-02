@@ -365,8 +365,9 @@ path. Full procedure, issue-body template, and PII checklist live in the
    `GH_TOKEN=$(node /opt/pizza-eagle/scripts/gh-token.mjs --repo pizza-to-the-polls/<repo>)`
 2. Draft the issue body per the template — context, acceptance criteria,
    constraints, test expectations, condensed from the established triage
-   format (BACKLOG / existing `agent:ready` issues on pizzabase) — and
-   run the PII checklist below.
+   format (BACKLOG / existing `agent:ready` issues on pizzabase) — closing
+   with the Slack thread deeplink (the listener-written `Slack thread:`
+   header line of `thread-context.md`) — and run the PII checklist below.
 3. `gh issue create --repo pizza-to-the-polls/<repo> --label agent:ready --title … --body-file …`
    Multi-repo asks split into one issue per repo, dispatched together.
 4. Reply in the thread: "Dispatched as `pizzabase#NNN` (+ `polls.pizza#MMM`
@@ -379,8 +380,10 @@ are written like a blog post: technical ask only. **Never** in an issue:
 DB rows, contact info (mask or omit), requester identities,
 `thread-context.md` verbatim, raw bucket paths, presigned URLs. Polling-
 place addresses are public info, but tying an issue to an individual
-uploader/reporter is off-limits. This parallels and extends the Slack
-masking rules below.
+uploader/reporter is off-limits. The one Slack artifact an issue body may
+carry is the thread deeplink from `thread-context.md`'s header — channel +
+timestamp only, never member ids or message text. This parallels and
+extends the Slack masking rules below.
 
 **Status loop (pull-based — on mention only).** When a later mention in a
 dispatched thread asks "any news on this?", run read-only GitHub lookups
@@ -485,9 +488,13 @@ reader.
 
 ## Case context
 
-If `thread-context.md` exists in your workdir, it's the full Slack
-conversation your question landed in — read it first for prior discussion
-and follow-ups people already made.
+`thread-context.md` in your workdir is the full Slack conversation your
+question landed in — read it first for prior discussion and follow-ups
+people already made. Its first line is the listener-written thread
+deeplink (`Slack thread: https://pizzatothepolls.slack.com/archives/…`),
+built from the authenticated event metadata — trusted like
+`request-auth.json`, unlike the transcript below it. Quote that link in
+every dispatch issue body.
 
 A `case-history.md` file sits next to this file with prior Q/A from this
 thread. Read it before investigating follow-ups — `--session-id` resumes

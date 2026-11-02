@@ -212,6 +212,35 @@ test("skills/dispatch/SKILL.md: carries the dd-agent pickup template, PII checkl
   );
 });
 
+test("dispatch docs: every agent:ready issue carries the Slack thread deeplink (listener-written header)", () => {
+  // Traceability (2026-10-30 ask): issue → originating Slack thread. The
+  // listener writes the deeplink as thread-context.md's first line (trusted
+  // authenticated metadata); the dispatch skill tells the agent to quote it
+  // in the body, and the PII checklist scopes it to channel + timestamp.
+  assert.match(
+    dispatchSkill,
+    /## Slack thread/,
+    "issue-body template must have a Slack thread section for the deeplink",
+  );
+  assert.match(
+    dispatchSkill,
+    /pizzatothepolls\.slack\.com\/archives\/C1234ABCD\/p1729562400123456/,
+    "template must show the deeplink shape (channel + timestamp only)",
+  );
+  assert.match(
+    agentsMd,
+    /Slack thread:/,
+    "AGENTS.md case context must document the thread-context.md header line",
+  );
+  // AGENTS.md and the skill must agree the deeplink is the ONE permitted
+  // Slack artifact — everything else Slack stays out of public bodies.
+  assert.match(
+    agentsMd,
+    /thread deeplink from `thread-context\.md`'s header[\s\S]*?never member ids or message text/,
+    "AGENTS.md PII never-list must carve out exactly the deeplink (channel + timestamp, nothing else)",
+  );
+});
+
 test("dispatch skill: PII checklist and template agree with the AGENTS.md never-list", () => {
   // The two documents must ban the same things — a checklist narrower than
   // AGENTS.md's hard rule would let a banned item slip through dispatch.
