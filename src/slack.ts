@@ -82,6 +82,22 @@ export function formatThreadMessages(
     .join("\n");
 }
 
+/** Deeplink to a thread's parent message in the PTP workspace. Channel id +
+ * timestamp only — no member identity — so it is safe to quote in public
+ * issue bodies (dispatch traceability: every agent:ready issue links back to
+ * the Slack thread that asked for the work). */
+export function threadDeeplink(channel: string, ts: string): string {
+  return `https://pizzatothepolls.slack.com/archives/${channel}/p${ts.replace(".", "")}`;
+}
+
+/** The thread-context.md document the listener writes: a trusted,
+ * listener-written deeplink header (built from the authenticated event's
+ * channel/timestamp, never from message text) above the untrusted Slack
+ * transcript. The header is what dispatch issues quote. */
+export function threadContextDoc(channel: string, ts: string, transcript: string): string {
+  return `Slack thread: ${threadDeeplink(channel, ts)}\n\n${transcript}`.trimEnd() + "\n";
+}
+
 /** Fetch the full thread the bot was tagged in (needs channels:history). */
 export async function fetchThreadContext(
   slack: WebClient,

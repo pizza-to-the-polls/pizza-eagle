@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chunkMarkdown, formatThreadMessages, react, stripMention, toSlackMrkdwn } from "../src/slack.js";
+import { chunkMarkdown, formatThreadMessages, react, stripMention, threadContextDoc, threadDeeplink, toSlackMrkdwn } from "../src/slack.js";
 
 test("mrkdwn: ATX headers become bold lines", () => {
   assert.equal(toSlackMrkdwn("## Report status\n### Details"), "*Report status*\n*Details*");
@@ -88,6 +88,36 @@ test("mrkdwn: bare member IDs become real mentions; linked IDs and code untouche
   assert.equal(toSlackMrkdwn("run `@U2ZLJ2KBP` in code"), "run `@U2ZLJ2KBP` in code");
   assert.equal(toSlackMrkdwn("normal @mention prose stays put"), "normal @mention prose stays put");
   assert.equal(toSlackMrkdwn("start-of-line @U0CAH280B6E mention"), "start-of-line <@U0CAH280B6E> mention");
+});
+
+test("threadDeeplink: channel + ts → pttp archives URL, dot stripped", () => {
+  assert.equal(
+    threadDeeplink("C01CFGKK279", "1729562400.123456"),
+    "https://pizzatothepolls.slack.com/archives/C01CFGKK279/p1729562400123456",
+  );
+});
+
+test("threadContextDoc: listener-written deeplink header over the transcript", () => {
+  const doc = threadContextDoc(
+    "C01CFGKK279",
+    "1729562400.123456",
+    "[17:23:00] U2ZLJ2KBP: please fix the media splitter\n[17:24:00] U2ZLJ2KBP: thanks",
+  );
+  // First line is the deeplink the dispatch template quotes — always there,
+  // even when the transcript below is empty (first top-level mention).
+  assert.ok(
+    doc.startsWith("Slack thread: https://pizzatothepolls.slack.com/archives/C01CFGKK279/p1729562400123456\n"),
+    "doc must open with the Slack thread: deeplink header line",
+  );
+  assert.ok(doc.includes("[17:23:00] U2ZLJ2KBP: please fix the media splitter"), "transcript follows the header");
+  assert.ok(doc.endsWith("\n"), "trailing newline");
+  // Empty transcript (no replies yet) still yields the header for dispatch.
+  const emptyDoc = threadContextDoc("C01CFGKK279", "1729562400.123456", "");
+  assert.equal(
+    emptyDoc,
+    "Slack thread: https://pizzatothepolls.slack.com/archives/C01CFGKK279/p1729562400123456\n",
+    "empty transcript: header-only doc",
+  );
 });
 
 test("formatThreadMessages: readable transcript with @mentions resolved", () => {
