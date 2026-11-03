@@ -11,7 +11,7 @@ import { readFileSync } from "node:fs";
 
 // Write-power gate (keep in sync with AGENTS.md — the instruction-level
 // gate; this is the detection mirror of it)
-export const WRITE_GATE = ["U2ZLJ2KBP", "U0B740NG8E6", "U01CQKPAT35"];
+export const WRITE_GATE = ["U2ZLJ2KBP", "U0B740NG8E6", "U01CQKPAT35", "U01DZ6QC12L"];
 
 const PII_HARVEST = [
   /list of ((all |the )*)(donor|donor'?s?|voter|voters?)\s*emails/i,

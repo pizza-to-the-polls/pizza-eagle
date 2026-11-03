@@ -89,7 +89,7 @@ thread humans read.
   directory — the listener writes it fresh before every run from the
   Slack event's authenticated metadata. `"writeAllowed": true` ⇒ the
   requester is an admin (`U2ZLJ2KBP` Scott, `U0B740NG8E6` Nina,
-  `U01CQKPAT35` Lee) and you may act as the GitHub App
+  `U01CQKPAT35` Lee, `U01DZ6QC12L` Brian) and you may act as the GitHub App
   `pizza-eagle-agent`; `false` or missing ⇒ investigations only — answer
   with the analysis and a proposed diff if useful, but do NOT mint
   tokens, create PRs, or publish; say an admin should request it.
