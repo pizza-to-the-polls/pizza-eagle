@@ -342,6 +342,133 @@ test("gh-token: the interactive gate is unchanged by the purpose path", () => {
   assert.match(gated.ledger, /"requester":"U2ZLJ2KBP"/, "a human requester, not a timer");
 });
 
+test("run-investigation-container.sh: secrets ride a sourced env file, never sudo argv (issue #65)", () => {
+  // 2026-11-04: run_dropped assembled the whole drop env as argv to
+  // `sudo -u pizza-eagle-inv env VAR=… pi …` — and systemd journals the full
+  // argv of every sudo invocation, so OPENROUTER_KEY_EAGLE and the Zapier MCP
+  // token sat in plaintext in journald, readable by anyone with journal
+  // access. Both halves of that transport must stay gone, and the env-file
+  // replacement must stay in place: build_drop_env prints a SOURCEABLE file
+  // piped through the inv user's stdin, and the dropped shell sources it
+  // before exec'ing the command.
+  const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const body = readFileSync(join(repoRoot, "scripts", "run-investigation-container.sh"), "utf8");
+
+  // The old argv transport: an env(1) argument list accumulated line by line.
+  assert.ok(!body.includes('env "${args[@]}"'), "env(1) argv list must never return — systemd journals sudo's full argv");
+  assert.ok(!/args\+=\(/.test(body), "the argv-accumulating env loop must never return");
+
+  // build_drop_env: sourceable `export VAR=%q` output, not raw VAR=value
+  // lines for env(1). %q keeps hostile VALUES (URLs with '?', quotes, '$')
+  // from injecting into the sourcing shell.
+  const bde = body.slice(body.indexOf("build_drop_env() {"), body.indexOf("run_dropped() {"));
+  assert.ok(bde.length > 0, "build_drop_env must exist");
+  assert.match(bde, /printf 'export %s=%q\\n'/, "passthrough values must ride %q-quoted export lines");
+  assert.ok(!/printf '%s=%s\\n'/.test(bde), "the raw unquoted env(1) value format must be gone");
+
+  // run_dropped: env content flows through STDIN into a per-run file, which
+  // is sourced INSIDE the sudo'd shell — so sudo's argv carries only a
+  // static script, the env-file path, and the command. No variable holding
+  // a secret value may be interpolated anywhere into the invocation.
+  const dropped = body.slice(body.indexOf("run_dropped() {"), body.indexOf("CHILD_PID=$!"));
+  assert.ok(dropped.length > 0, "run_dropped must exist");
+  assert.match(dropped, /build_drop_env \|/, "env file content must be piped (stdin), never passed as an argument");
+  assert.match(dropped, /umask 077/, "env file must be created mode 0600 via umask");
+  assert.match(dropped, /chmod 0600/, "env file mode must be explicitly pinned 0600");
+  assert.match(dropped, /\. "\$1" && shift && exec "\$@"/, "the env file must be sourced inside the dropped shell, then exec");
+  assert.ok(
+    !/OPENROUTER|ZAPIER|GA_PROPERTY|GH_APP/.test(dropped),
+    "no secret-bearing env name may appear in run_dropped's argv composition",
+  );
+});
+
+/**
+ * Functional check of the env-file mechanism run_dropped uses across the
+ * privilege boundary (issue #65): the exact `bash -c '. "$1" && shift &&
+ * exec "$@"' _ <run-env> CMD…` invocation the wrapper performs under sudo,
+ * driven here WITHOUT root/sudo — so it runs in CI — but exercising the
+ * wrapper's real build_drop_env output and the real sourcing line.
+ *
+ * Verifies the three properties the box depends on:
+ *   1. tricky secret VALUES survive build_drop_env's %q quoting and land
+ *      intact in the exec'd child's environment (creds still load);
+ *   2. unset passthrough variables are omitted, never forwarded blank;
+ *   3. the sudo argv — the line journald records — contains none of them.
+ */
+test("run-investigation-container.sh: env-file sourcing delivers secrets to the child, argv stays clean (issue #65)", () => {
+  const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const src = readFileSync(join(repoRoot, "scripts", "run-investigation-container.sh"), "utf8");
+
+  // Pull the REAL definitions out of the wrapper — the test tracks the
+  // script, not a copy of it. Both extractions fail loudly if the script
+  // drifts away from the shapes these anchors pin.
+  const passthrough = src.match(/^PASSTHROUGH_ENV=\([^\n]*\)$/m)?.[0];
+  const dropEnvFn = src.match(/^build_drop_env\(\) \{[\s\S]*?^\}$/m)?.[0];
+  assert.ok(passthrough, "wrapper must define PASSTHROUGH_ENV at column 0");
+  assert.ok(dropEnvFn, "wrapper must define build_drop_env() at column 0");
+  assert.match(passthrough, /OPENROUTER_KEY_EAGLE/, "extraction picked up the real passthrough list");
+
+  const tmp = mkdtempSync(join(tmpdir(), "pe-runenv-"));
+  try {
+    // The live secret shapes from the 2026-11-04 journald sighting, plus a
+    // value designed to punish naive interpolation (quotes, $, backtick,
+    // space) — %q must neutralize all of it.
+    const secrets: Record<string, string> = {
+      OPENROUTER_KEY_EAGLE: "sk-or-v1-test-only-not-a-real-key",
+      ZAPIER_MCP_URL: "https://mcp.zapier.com/api/v1/connect?token=sekrit-test-token&x=1",
+      GA_PROPERTY_ID: "12'3$4\"5`6 7",
+    };
+
+    // 1. build_drop_env → per-run env file (the wrapper's stdin transport).
+    const gen = spawnSync(
+      "bash",
+      ["-c", `set -euo pipefail\n${passthrough}\n${dropEnvFn}\nDROP_HOME=${JSON.stringify(join(tmp, "home"))}\nbuild_drop_env`],
+      {
+        env: { ...process.env, ...secrets, OPENROUTER_KEY_PIZZA: "", AWS_REGION: process.env.AWS_REGION ?? "us-west-2" },
+        encoding: "utf8",
+      },
+    );
+    assert.equal(gen.status, 0, `build_drop_env failed: ${gen.stderr}`);
+
+    const envFile = join(tmp, "run-env");
+    writeFileSync(envFile, gen.stdout);
+    chmodSync(envFile, 0o600);
+    const fileBody = readFileSync(envFile, "utf8");
+    for (const [name, value] of Object.entries(secrets)) {
+      assert.ok(fileBody.includes(`export ${name}=`), `${name} must be in the env file`);
+    }
+    assert.ok(!fileBody.includes("OPENROUTER_KEY_PIZZA="), "empty/unset passthrough must be omitted, not forwarded blank");
+    assert.equal(statSync(envFile).mode & 0o777, 0o600, "per-run env file must be mode 0600");
+
+    // 2. The EXACT invocation run_dropped performs under sudo — here as the
+    //    current user, so CI can run it. journald records this argv.
+    const mockPi = join(tmp, "mock-env-dump.sh");
+    writeFileSync(mockPi, "#!/usr/bin/env bash\nenv | LC_ALL=C sort > \"$PWD/child-env.txt\"\n");
+    chmodSync(mockPi, 0o755);
+    const sudoArgv = ["bash", "-c", '. "$1" && shift && exec "$@"', "_", envFile, mockPi];
+    const run = spawnSync("bash", sudoArgv.slice(1), { cwd: tmp, encoding: "utf8" });
+    assert.equal(run.status, 0, `sourcing mechanism failed: ${run.stderr}`);
+
+    // 3a. The child GOT its credentials from the sourced file — including
+    //     the hostile value, byte-identical after the %q round-trip.
+    const childEnv = readFileSync(join(tmp, "child-env.txt"), "utf8");
+    for (const [name, value] of Object.entries(secrets)) {
+      assert.match(childEnv, new RegExp(`^${name}=${value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m"),
+        `${name} must round-trip %q quoting into the child's environment`);
+    }
+
+    // 3b. The argv that would land in journald carries NO secret values:
+    //     no key material, no token, no allowlist value.
+    const journaldLine = sudoArgv.join(" ");
+    for (const value of Object.values(secrets)) {
+      assert.ok(!journaldLine.includes(value), `secret value ${JSON.stringify(value.slice(0, 20))}… must never appear in the sudo argv`);
+    }
+    assert.ok(!/sk-|token=/.test(journaldLine), "no sk-/token= shaped material anywhere in the sudo argv");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 /**
  * Behavioral test for scripts/install-skills.sh (2026-11-02 skills-sync issue).
  * The script reads REPO_DIR and SKILL_TARGET from the environment

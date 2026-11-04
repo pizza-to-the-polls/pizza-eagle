@@ -284,6 +284,23 @@ what the boundary actually is, and what was fixed:
 - Never post raw contact info or raw bucket paths to Slack — conventions
   live in `agent/AGENTS.md`.
 
+**Journald argv is a secret surface (2026-11-04, issue #65).** systemd
+journals the full argv of every `sudo`/`runuser` invocation, and journald is
+readable by any user with journal access — so any secret passed as a
+command-line argument is plaintext on disk forever. This bit for real:
+the isolation wrapper used to assemble the drop env as `sudo … env
+VAR=… pi …` arguments, leaving `OPENROUTER_KEY_EAGLE` and the Zapier MCP
+URL (token embedded) in `journalctl -u pizza-eagle` for every run. The
+wrapper now writes a per-run env file (mode 0600, owned by
+`pizza-eagle-inv`, removed with the stage in the EXIT trap) and SOURCES it
+inside the sudo'd shell (`bash -c '. "$1" && shift && exec "$@"'`), so no
+secret ever appears in argv. **The rule for all future secret transport
+across a privilege boundary: an env file sourced on the far side, never
+`VAR=value` arguments.** The same logic applies to helper scripts and
+one-liners run from the unit — anything whose argv systemd records. (The
+leaked OpenRouter key + Zapier token still need rotation in Secrets
+Manager — human follow-up.)
+
 **Known residual** (tracked in RUNBOOK): the worker shares the instance
 profile/IMDS with bootstrap, so `ptp/prod/pizza-eagle/*` secrets (incl.
 `gh-app-key`) remain reachable from a tool-compromised run — the durable fix
