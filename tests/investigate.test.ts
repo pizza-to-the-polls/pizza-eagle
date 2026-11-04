@@ -614,12 +614,46 @@ test("runInvestigation: non-zero wrapper exit fails the run with the stderr tail
       assert.ok(e instanceof InvestigationError, "failures are InvestigationError");
       assert.match((e as InvestigationError).message, /code 3/);
       assert.match((e as InvestigationError).stderr, /rds data api unreachable/, "stderr tail captured");
+      // Issue #67: failures carry duration + outcome so the listener's
+      // answer event in usage.jsonl distinguishes error from timeout/killed.
+      assert.equal((e as InvestigationError).outcome, "error", "non-zero exit with no signal is 'error'");
+      assert.ok(
+        typeof (e as InvestigationError).durationMs === "number" && (e as InvestigationError).durationMs! >= 0,
+        "durationMs is recorded",
+      );
       return true;
     },
   );
   // The failed run still closes the case file (best-effort) with a stub.
   const hist = readFileSync(join(tmp, "case-history.md"), "utf8");
   assert.ok(hist.includes("(no output)"), "empty answer stubbed in the case file");
+});
+
+test("runInvestigation: timeout produces outcome=timeout with duration (issue #67)", async () => {
+  // The usage ledger's answer event must distinguish a 20-minute timeout
+  // from an ordinary error. A tiny timeoutMs forces the killer path without
+  // waiting anywhere near the real limit.
+  const tmp = mkdtempSync(join(tmpdir(), "pe-inv-"));
+  const wrapper = join(tmp, "mock-wrapper.sh");
+  writeFileSync(wrapper, "#!/usr/bin/env bash\nsleep 30\n");
+  chmodSync(wrapper, 0o755);
+  await assert.rejects(
+    () =>
+      runInvestigation({ ...cfg, invWrapper: wrapper, timeoutMs: 300 }, {
+        question: "q",
+        sessionId: SESSION_ID,
+        workdir: tmp,
+      }),
+    (e: unknown) => {
+      assert.ok(e instanceof InvestigationError, "failures are InvestigationError");
+      assert.match((e as InvestigationError).message, /exceeded/);
+      assert.equal((e as InvestigationError).outcome, "timeout");
+      assert.ok((e as InvestigationError).durationMs! >= 300, "durationMs covers the full wait");
+      return true;
+    },
+  );
+  const hist = readFileSync(join(tmp, "case-history.md"), "utf8");
+  assert.ok(hist.includes("(timed out)"), "case file closed with the timeout stub");
 });
 
 test("runInvestigation: missing wrapper fails fast instead of hanging", async () => {

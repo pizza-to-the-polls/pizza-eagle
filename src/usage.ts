@@ -3,7 +3,10 @@
  *
  * The audit trail for "is this being abused?": every question (requester,
  * channel, case) and every write-power use (token mints — the choke point
- * through which ALL GitHub writes must pass) lands here. The daily
+ * through which ALL GitHub writes must pass) lands here. Every question
+ * event is paired with an answer event (issue #67) carrying the run's
+ * duration, outcome, and model — so latency, real failure rate, and volume
+ * are a one-line jq over this file, not log archaeology. The daily
  * self-check digests it; the retention prune ages it out with everything
  * else (1-year class per PTP policy).
  */
@@ -11,12 +14,24 @@ import { appendFileSync, readFileSync } from "node:fs";
 
 export interface UsageEvent {
   ts: string;          // ISO
-  event: "question" | "token-mint" | "publish" | "flag";
-  requester?: string;   // Slack member id (questions) — mints carry the repo
+  event: "question" | "answer" | "token-mint" | "publish" | "flag";
+  requester?: string;   // Slack member id (questions/answers) — mints carry the repo
   channel?: string;
   case?: string;        // case id prefix
   detail?: string;      // repo / slug for mints + publishes; reasons for flags
   rule?: string;        // suspicion rule name (flag events)
+  // ── answer-event fields (issue #67): the completion half of every
+  // question event.
+  /** Wall-clock duration of the run in milliseconds. */
+  durationMs?: number;
+  /** How the run ended: ok / timeout / error / killed (by signal). */
+  outcome?: "ok" | "timeout" | "error" | "killed";
+  /** Resolved per-run model (PI_MODEL override or the staged default). */
+  model?: string;
+  /** Last ~200 chars of stderr on a failed run — triage without the logs. */
+  errorTail?: string;
+  /** Reserved: token usage once pi exposes it (e.g. --print JSON footer). */
+  tokens?: unknown;
 }
 
 export function appendUsage(stateDir: string, ev: UsageEvent): void {
