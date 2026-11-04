@@ -25,7 +25,9 @@ if ! jq -e '.writeAllowed == true' ./request-auth.json >/dev/null 2>&1; then
   echo "FATAL: write powers not granted for this case (request-auth.json) — ask an admin" >&2
   exit 3
 fi
-REQUESTER=$(jq -r '.requester // "unknown"' ./request-auth.json)
+# Issue #69: requesterName is the Slack-resolved display name (users.info);
+# fall back to the raw id for pre-#69 case files.
+REQUESTER=$(jq -r '.requesterName // .requester // "unknown"' ./request-auth.json)
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 GH_TOKEN=$(node "$REPO_ROOT/scripts/gh-token.mjs" --repo pizza-to-the-polls/hotnready 2>/dev/null) \

@@ -1,6 +1,118 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chunkMarkdown, formatThreadMessages, react, stripMention, threadContextDoc, threadDeeplink, toSlackMrkdwn } from "../src/slack.js";
+import type { WebClient } from "@slack/web-api";
+import {
+  chunkMarkdown,
+  clearUserNameCache,
+  formatThreadMessages,
+  react,
+  resolveUserName,
+  stripMention,
+  threadContextDoc,
+  threadDeeplink,
+  toSlackMrkdwn,
+} from "../src/slack.js";
+
+// ── resolveUserName: Slack-resolved requester names (issue #69) ────────────
+// AGENTS.md prose once mislabeled admin U2ZLJ2KBP as "Matt"; the requester's
+// name must come from Slack itself (users.info), cached per user id.
+
+interface MockInfo {
+  calls: number;
+  respond: (user: string) => Promise<unknown> | unknown;
+}
+
+function mockSlack(users: Record<string, unknown>): { client: WebClient; info: MockInfo } {
+  const info: MockInfo = {
+    calls: 0,
+    respond: (user) => {
+      if (!(user in users)) throw new Error(`user_not_found: ${user}`);
+      return { ok: true, user: users[user] };
+    },
+  };
+  const client = {
+    users: {
+      info: async (args: { user: string }) => {
+        info.calls++;
+        return info.respond(args.user);
+      },
+    },
+  } as unknown as WebClient;
+  return { client, info };
+}
+
+test("resolveUserName: prefers the Slack display_name", async () => {
+  clearUserNameCache();
+  const { client, info } = mockSlack({
+    U2ZLJ2KBP: { id: "U2ZLJ2KBP", profile: { display_name: "Dr. Scott", real_name: "Scott Realname" } },
+  });
+  assert.equal(await resolveUserName(client, "U2ZLJ2KBP"), "Dr. Scott");
+  assert.equal(info.calls, 1, "one users.info call");
+});
+
+test("resolveUserName: falls back to real_name when display_name is blank", async () => {
+  clearUserNameCache();
+  const { client } = mockSlack({
+    U0B740NG8E6: { id: "U0B740NG8E6", profile: { display_name: "   ", real_name: "Nina Realname" } },
+  });
+  assert.equal(await resolveUserName(client, "U0B740NG8E6"), "Nina Realname");
+});
+
+test("resolveUserName: falls back to the bare userId when Slack has no names", async () => {
+  clearUserNameCache();
+  const { client } = mockSlack({ U01CQKPAT35: { id: "U01CQKPAT35", profile: {} } });
+  assert.equal(await resolveUserName(client, "U01CQKPAT35"), "U01CQKPAT35");
+});
+
+test("resolveUserName: users.info failure degrades to the userId, never throws", async () => {
+  clearUserNameCache();
+  const { client, info } = mockSlack({}); // no users at all → user_not_found
+  const name = await resolveUserName(client, "U999UNKNOWN");
+  assert.equal(name, "U999UNKNOWN", "cosmetic name must never fail a run");
+  assert.equal(info.calls, 1);
+  // Failed lookups are not cached — the next mention retries the API.
+  const { client: retryClient, info: retryInfo } = mockSlack({
+    U999UNKNOWN: { id: "U999UNKNOWN", profile: { display_name: "Now Known" } },
+  });
+  assert.equal(await resolveUserName(retryClient, "U999UNKNOWN"), "Now Known");
+  assert.equal(retryInfo.calls, 1, "retry after failure hits the API again");
+});
+
+test("resolveUserName: caches per user id within the TTL window", async () => {
+  clearUserNameCache();
+  const { client, info } = mockSlack({
+    U2ZLJ2KBP: { id: "U2ZLJ2KBP", profile: { display_name: "Dr. Scott" } },
+    U0B740NG8E6: { id: "U0B740NG8E6", profile: { display_name: "Nina" } },
+  });
+  assert.equal(await resolveUserName(client, "U2ZLJ2KBP"), "Dr. Scott");
+  assert.equal(await resolveUserName(client, "U2ZLJ2KBP"), "Dr. Scott", "second call same window");
+  assert.equal(info.calls, 1, "second call within TTL is served from cache");
+  assert.equal(await resolveUserName(client, "U0B740NG8E6"), "Nina");
+  assert.equal(info.calls, 2, "cache is per user id, not global");
+});
+
+test("resolveUserName: entries expire after the TTL and re-fetch", async () => {
+  clearUserNameCache();
+  const { client, info } = mockSlack({
+    U2ZLJ2KBP: { id: "U2ZLJ2KBP", profile: { display_name: "Old Name" } },
+  });
+  assert.equal(await resolveUserName(client, "U2ZLJ2KBP"), "Old Name");
+  assert.equal(info.calls, 1);
+  const realNow = Date.now;
+  try {
+    // Jump past the 5-minute TTL: the cached entry must be considered stale
+    // (a rename mid-incident shows up within minutes, not never).
+    Date.now = () => realNow() + 6 * 60_000;
+    const { client: later, info: laterInfo } = mockSlack({
+      U2ZLJ2KBP: { id: "U2ZLJ2KBP", profile: { display_name: "New Name" } },
+    });
+    assert.equal(await resolveUserName(later, "U2ZLJ2KBP"), "New Name", "stale entry re-fetched");
+    assert.equal(laterInfo.calls, 1, "expired entry does not serve the old name");
+  } finally {
+    Date.now = realNow;
+    clearUserNameCache(); // don't leak a future-stamped entry into other tests
+  }
+});
 
 test("mrkdwn: ATX headers become bold lines", () => {
   assert.equal(toSlackMrkdwn("## Report status\n### Details"), "*Report status*\n*Details*");
