@@ -316,6 +316,40 @@ test("wrapper: re-validates session id, question length, and workdir (defense in
   assert.match(noDir.stderr, /workdir does not exist/);
 });
 
+test("wrapper: allowlisted secrets reach the pi child in every mode (issue #65 acceptance)", () => {
+  // Issue #65 moved the drop's secrets off sudo's argv into a sourced per-run
+  // env file. Whatever the transport, the child must still RECEIVE the
+  // OpenRouter key and the Zapier MCP URL (else every investigation loses its
+  // model + harness access). Mode 3 (the hermetic path these tests drive) is
+  // a plain exec — env passes through — while the box modes source the env
+  // file; scripts.test.ts covers that sourcing mechanically.
+  const tmp = mkdtempSync(join(tmpdir(), "pe-wrap-env-"));
+  const mockPi = join(tmp, "mock-env-pi.sh");
+  writeFileSync(
+    mockPi,
+    '#!/usr/bin/env bash\nprintf \'%s\\n\' "$@" > "$PWD/pi-argv.txt"\nenv | LC_ALL=C sort > "$PWD/pi-env.txt"\n',
+  );
+  chmodSync(mockPi, 0o755);
+  const key = "sk-or-v1-issue65-regression-key";
+  const zapier = "https://mcp.zapier.com/api/v1/connect?token=issue65-regression-token";
+  const r = runWrapper([tmp, SESSION_ID, "q"], {
+    PI_BIN: mockPi,
+    OPENROUTER_KEY_EAGLE: key,
+    ZAPIER_MCP_URL: zapier,
+  });
+  assert.equal(r.status, 0, `wrapper failed: ${r.stderr}`);
+  const childEnv = readFileSync(join(tmp, "pi-env.txt"), "utf8");
+  assert.match(childEnv, new RegExp(`^OPENROUTER_KEY_EAGLE=${key}$`, "m"), "model key reaches pi");
+  assert.match(
+    childEnv,
+    new RegExp(`^ZAPIER_MCP_URL=${zapier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`, "m"),
+    "zapier MCP endpoint (token embedded) reaches pi",
+  );
+  // And the wrapper itself never echoes a secret to its streams.
+  assert.ok(!r.stdout.includes(key) && !r.stderr.includes(key), "no key material in wrapper stdout/stderr");
+  assert.ok(!r.stdout.includes("token=") && !r.stderr.includes("token="), "no token material in wrapper streams");
+});
+
 test("wrapperEnv: explicit allowlist — Slack tokens are structurally absent", () => {
   // The old childEnv() SCRUBBED tokens from an inherited env; the new boundary
   // sends an explicit allowlist instead — omission by construction, not by

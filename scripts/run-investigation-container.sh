@@ -43,7 +43,9 @@
 # WHAT THE CHILD CAN REACH (all modes): the case workdir (bind-mounted /
 # cwd, the ONLY writable path), triage-read credentials staged per run from
 # the listener user's HOME (GA service account, Bugsnag readonly token,
-# pi's models.json — the model key is env-keyed, never on disk), the AWS
+# pi's models.json — the model key is env-keyed: it rides a per-run 0600
+# env file in the PrivateTmp stage, removed on exit, never in the workdir
+# and never on sudo's argv — issue #65), the AWS
 # instance role via IMDS (by design — read-only triage policy), and the
 # repo's helper scripts mounted read-only so AGENTS.md absolute paths keep
 # working. Nothing else: not state/, not the listener's env, not the
@@ -61,9 +63,15 @@
 #
 # SUDOERS (bootstrap.sh installs /etc/sudoers.d/pizza-eagle-investigation):
 #   pizza-eagle ALL=(pizza-eagle-inv) NOPASSWD: ALL
-# The drop carries an explicit env (HOME + passthrough list via `env`),
-# so sudo's env_reset cannot leak anything else into the child — and it
-# also means no env_keep knobs need maintaining in sudoers.
+# The drop carries an explicit env, but NEVER on sudo's command line:
+# systemd journals the full argv of every sudo invocation, so any
+# VAR=value passed as an argument lands in plaintext in journald (issue
+# #65: OPENROUTER_KEY_EAGLE and the Zapier MCP token sat there for every
+# run until 2026-11-04). Instead the wrapper writes a per-run env file
+# (mode 0600, inv-owned, removed by the EXIT trap) and SOURCES it inside
+# the sudo'd shell — no secret ever appears in argv. Sourcing also keeps
+# sudo's env_reset from leaking anything else into the child, so no
+# env_keep knobs need maintaining in sudoers.
 set -euo pipefail
 
 INV_USER="${INV_USER:-pizza-eagle-inv}"
@@ -140,27 +148,53 @@ can_drop() {
 # listener's full env can never ride along, whatever invokes this script.
 PASSTHROUGH_ENV=(OPENROUTER_KEY_EAGLE OPENROUTER_KEY_PIZZA GH_APP_ID GA_PROPERTY_ID ZAPIER_MCP_URL PI_MODEL)
 DROP_HOME="$INV_HOME"  # mode 2 overrides this with its staged HOME before run_dropped
-build_drop_env() {  # prints env(1) arguments: HOME, PATH, passthrough
-  printf 'HOME=%s\n' "$DROP_HOME"
-  printf 'PATH=%s\n' "${PATH:-/usr/local/bin:/usr/bin:/bin}"
+# Prints a SOURCEABLE env file ("export VAR=%q" lines) — NOT env(1)
+# arguments. The file is written per run and sourced inside the sudo'd
+# shell (run_dropped below), so secrets never appear in sudo's argv:
+# systemd journals that argv in full and journald is readable by any user
+# with journal access (issue #65). %q shell-quotes every value, so URLs
+# with '?', '$', quotes, backticks etc. cannot inject into the sourcing
+# shell either. Variables left unset by the listener are simply omitted,
+# so the child never sees a blank OPENROUTER_KEY.
+build_drop_env() {
+  printf 'export HOME=%q\n' "$DROP_HOME"
+  printf 'export PATH=%q\n' "${PATH:-/usr/local/bin:/usr/bin:/bin}"
   local v
   for v in "${PASSTHROUGH_ENV[@]}"; do
-    [[ -n "${!v:-}" ]] && printf '%s=%s\n' "$v" "${!v}"
+    [[ -n "${!v:-}" ]] && printf 'export %s=%q\n' "$v" "${!v}"
   done
-  printf 'AWS_REGION=%s\n' "$AWS_REGION"
+  printf 'export AWS_REGION=%q\n' "$AWS_REGION"
   return 0
 }
 
 # Runs the given command as the inv user in the background, forwarding
 # TERM/INT (the listener kills active investigations on shutdown — with a
 # plain exec the signal would replace this shell and orphan the container).
+#
+# The env rides a per-run FILE, never argv: systemd journals the full argv
+# of every sudo/runuser invocation, so env assignments on the command line
+# would leak every passthrough secret to journald (issue #65). The file is
+# written by piping build_drop_env's output into the inv user's stdin
+# (mode 0600 via umask + an explicit chmod) and then SOURCED inside the
+# dropped shell (`bash -c '. "$1" && shift && exec "$@"'`): secrets flow
+# through the pipe and the file, and the only things on sudo's argv are a
+# static script, the env-file PATH, and the command itself. The file lives
+# in the staged HOME — the one directory under the stage root the inv user
+# can create files in (the 0711 stage root itself is listener-owned,
+# traverse-only) — and the EXIT trap's rm -rf "$STAGE" removes it with the
+# rest of the staging. A write failure fires here, before any child is
+# spawned, so a failed env file can never yield a cred-less investigation.
 run_dropped() {  # run_dropped CMD...
-  local drop_env args=()
-  while IFS= read -r drop_env; do args+=("$drop_env"); done < <(build_drop_env)
+  [[ -n "${STAGE:-}" && -d "$STAGE/home" ]] || die "run_dropped: stage not set up (internal error)"
+  local env_file="$STAGE/home/run-env"
   if [[ "$(id -u)" == "0" ]]; then
-    runuser -u "$INV_USER" -- env "${args[@]}" "$@" &
+    build_drop_env | runuser -u "$INV_USER" -- sh -c 'umask 077; cat > "$1"' _ "$env_file"
+    runuser -u "$INV_USER" -- chmod 0600 "$env_file"
+    runuser -u "$INV_USER" -- bash -c '. "$1" && shift && exec "$@"' _ "$env_file" "$@" &
   else
-    sudo -n -u "$INV_USER" -- env "${args[@]}" "$@" &
+    build_drop_env | sudo -n -u "$INV_USER" -- sh -c 'umask 077; cat > "$1"' _ "$env_file"
+    sudo -n -u "$INV_USER" -- chmod 0600 "$env_file"
+    sudo -n -u "$INV_USER" -- bash -c '. "$1" && shift && exec "$@"' _ "$env_file" "$@" &
   fi
   CHILD_PID=$!
 }
