@@ -23,7 +23,10 @@ Parameters:
     # family) — a change here executes as an ASG-replacing update
     # (AutoScalingReplacingUpdate below) and lands with a fresh user-data;
     # re-run feedflag's ops/bastion/install.sh on the new box.
-    Default: t4g.medium
+    # 2026-11-04: post-election unwind — back to t4g.small (the minimum
+    # sized box for this stack: eagle capped at 1G, steady state <1G; the
+    # OOM was the election-night peak leg, now date/hour-gated off).
+    Default: t4g.small
   KeyName:
     Type: String
     Default: ""
