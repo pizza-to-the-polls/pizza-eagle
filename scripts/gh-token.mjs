@@ -271,11 +271,17 @@ async function main() {
     if (!auth || auth.writeAllowed !== true) {
       console.error(
         "FATAL: write powers not granted for this case (request-auth.json) — " +
-        "ask an admin (Scott/Nina/Lee) to request it.");
+        "ask an admin to request it.");
       process.exit(3);
     }
     permissions = MINT_PERMISSIONS;
     requester = auth.requester ?? null;
+    // Issue #69: prefer the Slack-resolved display name for the ledger's
+    // human-readable line; authorization itself stays on the immutable id +
+    // writeAllowed. auth.requesterName may be absent (pre-#69 case files).
+    if (typeof auth.requesterName === "string" && auth.requesterName.trim()) {
+      requester = `${auth.requesterName} (${auth.requester})`;
+    }
   }
 
   const pem = fetchPem();

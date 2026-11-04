@@ -26,7 +26,7 @@ import {
   wrapperEnv,
   writeRequestAuth,
 } from "../src/investigate.js";
-import { stripMention } from "../src/slack.js";
+import { stripMention, resolveUserName, clearUserNameCache } from "../src/slack.js";
 import type { Config } from "../src/config.js";
 
 const cfg = {
@@ -113,7 +113,48 @@ test("request-auth: missing requester renders null, writeAllowed defaults falsy"
   writeRequestAuth(dir, {});
   const auth = JSON.parse(readFileSync(join(dir, "request-auth.json"), "utf8"));
   assert.equal(auth.requester, null);
+  assert.equal(auth.requesterName, null, "requesterName present (issue #69), null when unresolved");
   assert.equal(auth.writeAllowed, false);
+});
+
+test("regression (issue #69): AGENTS.md prose cannot relabel the requester — Slack-resolved name wins", async () => {
+  // 2026-10-25 incident: the box's prose named admin U2ZLJ2KBP "Matt" — a
+  // name nobody recognized — and the model's publish-gate reasoning trusted
+  // that prose, refusing a legitimate publish. The requester's identity
+  // (id + display name) must come from Slack via the LISTENER
+  // (writeRequestAuth), never from editable config prose. Here AGENTS.md
+  // claims the id belongs to "Matt" while Slack's users.info says
+  // "Dr. Scott"; the recorded identity must be the Slack name.
+  clearUserNameCache();
+  const agentDir = mkdtempSync(join(tmpdir(), "pe-agents-"));
+  writeFileSync(
+    join(agentDir, "AGENTS.md"),
+    "writeAllowed admins: U2ZLJ2KBP Matt, U0B740NG8E6 Nina.\n", // mislabeled prose
+  );
+  const slack = {
+    users: {
+      info: async () => ({
+        ok: true,
+        user: { id: "U2ZLJ2KBP", profile: { display_name: "Dr. Scott", real_name: "Scott Realname" } },
+      }),
+    },
+  } as unknown as import("@slack/web-api").WebClient;
+  const resolved = await resolveUserName(slack, "U2ZLJ2KBP");
+  assert.equal(resolved, "Dr. Scott", "name resolved from Slack, not prose");
+
+  // The listener writes exactly what Slack said, whatever AGENTS.md claims.
+  const dir = mkdtempSync(join(tmpdir(), "pe-auth-"));
+  writeRequestAuth(dir, { requester: "U2ZLJ2KBP", requesterName: resolved, writeAllowed: true });
+  const auth = JSON.parse(readFileSync(join(dir, "request-auth.json"), "utf8"));
+  assert.equal(auth.requester, "U2ZLJ2KBP");
+  assert.equal(auth.requesterName, "Dr. Scott");
+  assert.ok(!JSON.stringify(auth).includes("Matt"), "prose name never leaks into the auth record");
+
+  // Case history quotes the Slack-resolved name next to the immutable id.
+  openHistory(dir, "publish the beforeunload demo", "U2ZLJ2KBP", resolved);
+  const hist = readFileSync(join(dir, "case-history.md"), "utf8");
+  assert.match(hist, /\*\*Requester:\*\* Slack member `U2ZLJ2KBP` \(Dr\. Scott\)/);
+  assert.ok(!hist.includes("Matt"), "the prose mislabel never reaches the case file");
 });
 
 test("case history: requester id rides in BEFORE the run (write-gate can verify on Q1)", () => {
@@ -493,6 +534,34 @@ test("runInvestigation: relative workdir is resolved absolute before the spawn (
   } finally {
     process.chdir(prevCwd);
   }
+});
+
+test("runInvestigation: requesterName rides into request-auth.json and the case file (issue #69)", async () => {
+  const tmp = mkdtempSync(join(tmpdir(), "pe-inv-"));
+  const agentDir = mkdtempSync(join(tmpdir(), "pe-agents-"));
+  writeFileSync(join(agentDir, "AGENTS.md"), "writeAllowed admins: U2ZLJ2KBP Matt\n"); // conflicting prose
+  const wrapper = join(tmp, "mock-wrapper.sh");
+  writeFileSync(wrapper, "#!/usr/bin/env bash\necho done\n");
+  chmodSync(wrapper, 0o755);
+
+  await runInvestigation(
+    { ...cfg, invWrapper: wrapper, agentDir },
+    {
+      question: "publish the demo",
+      sessionId: SESSION_ID,
+      workdir: tmp,
+      requester: "U2ZLJ2KBP",
+      requesterName: "Dr. Scott", // what the listener resolved from Slack
+      writeAllowed: true,
+    },
+  );
+
+  const auth = JSON.parse(readFileSync(join(tmp, "request-auth.json"), "utf8"));
+  assert.equal(auth.requester, "U2ZLJ2KBP");
+  assert.equal(auth.requesterName, "Dr. Scott", "Slack-resolved name recorded, not prose");
+  assert.equal(auth.writeAllowed, true);
+  const hist = readFileSync(join(tmp, "case-history.md"), "utf8");
+  assert.match(hist, /\*\*Requester:\*\* Slack member `U2ZLJ2KBP` \(Dr\. Scott\)/);
 });
 
 test("runInvestigation: non-zero wrapper exit fails the run with the stderr tail", async () => {

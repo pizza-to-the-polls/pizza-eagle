@@ -127,6 +127,49 @@ export async function react(
   }
 }
 
+/**
+ * Resolve a Slack user's display name via users.info, cached per user id.
+ *
+ * Issue #69 (red team 2026-10-27, finding 4 — identity half): the bot's
+ * authorization-adjacent reasoning used to map user ids to human names via
+ * AGENTS.md prose, which is editable text — a mislabel there ("Matt" where
+ * Slack says Scott) misidentified a requester and produced a bogus publish-
+ * gate refusal. The name now comes from Slack itself and lands in the
+ * listener-written request-auth.json, which the model and helper scripts
+ * already treat as the only trusted requester signal.
+ *
+ * Cache: in-memory, tiny cardinality (the bot talks to a handful of
+ * operators), 5-minute TTL — long enough that follow-up mentions in a thread
+ * hit it, short enough that a rename shows up soon. Cleared on restart.
+ */
+const nameCache = new Map<string, { name: string; fetchedAt: number }>();
+const NAME_CACHE_TTL_MS = 5 * 60_000;
+
+export function clearUserNameCache(): void {
+  nameCache.clear();
+}
+
+export async function resolveUserName(slack: WebClient, userId: string): Promise<string> {
+  const cached = nameCache.get(userId);
+  if (cached && Date.now() - cached.fetchedAt < NAME_CACHE_TTL_MS) return cached.name;
+  try {
+    const res = await slack.users.info({ user: userId });
+    const profile = (res.user as { profile?: { display_name?: string; real_name?: string } } | undefined)?.profile;
+    // Prefer the user-chosen display name, then the full real name, then the
+    // bare id. Whitespace-only strings fall through to the next candidate.
+    const name =
+      [profile?.display_name, profile?.real_name].find((n) => typeof n === "string" && n.trim())?.trim() ?? userId;
+    nameCache.set(userId, { name, fetchedAt: Date.now() });
+    return name;
+  } catch (e) {
+    // Graceful degradation: the name is cosmetic — authorization stays on the
+    // immutable user id + writeAllowed. A users.info failure (network blip,
+    // missing scope, deleted user) must never fail an investigation.
+    console.warn(`[pizza-eagle] users.info failed for ${userId} (falling back to id): ${(e as Error).message}`);
+    return userId;
+  }
+}
+
 export function stripMention(text: string): string {
   // "<@U12345> why is upload 13280 orphaned?" -> "why is upload 13280 orphaned?"
   // IDs can contain digits + letters; tolerate a trailing colon/label forms.

@@ -156,6 +156,23 @@ test("gh-token: mint is repo-scoped, permission-scoped, and audited", () => {
   assert.match(r.ledger, /hotnready/);
 });
 
+test("gh-token: ledger prefers the Slack-resolved requesterName (issue #69)", () => {
+  // request-auth.json now carries the Slack-resolved display name; the ledger
+  // line should read "Name (id)" so an ops review sees who minted — while the
+  // authorization itself stays on the immutable id + writeAllowed.
+  const r = runHelper(["--repo", "pizza-to-the-polls/hotnready"], {
+    auth: { requester: "U2ZLJ2KBP", requesterName: "Dr. Scott", writeAllowed: true },
+  });
+  assert.equal(r.code, 0, "mint still succeeds");
+  assert.match(r.ledger, /"requester":"Dr\. Scott \(U2ZLJ2KBP\)"/);
+  // Pre-#69 case files without requesterName keep the plain-id ledger line.
+  const legacy = runHelper(["--repo", "pizza-to-the-polls/hotnready"], {
+    auth: { requester: "U2ZLJ2KBP", writeAllowed: true },
+  });
+  assert.equal(legacy.code, 0);
+  assert.match(legacy.ledger, /"requester":"U2ZLJ2KBP"/);
+});
+
 test("gh-token: no mint without write powers (request-auth.json gate)", () => {
   const noGate = runHelper(["--repo", "pizza-to-the-polls/hotnready"], {
     auth: { requester: "U9STRANGER", writeAllowed: false },
@@ -412,6 +429,21 @@ test("run-investigation-container.sh: repairs pre-isolation session perms before
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+test("publish-hotnready.sh: publish ledger names the Slack-resolved requester (issue #69)", () => {
+  // The publish ledger line should carry the Slack-resolved display name
+  // (requesterName) when present, falling back to the raw id for pre-#69
+  // case files — never re-derive a name from AGENTS.md prose.
+  const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
+  const body = readFileSync(join(repoRoot, "scripts", "publish-hotnready.sh"), "utf8");
+  assert.match(
+    body,
+    /REQUESTER=\$\(jq -r '\.requesterName \/\/ \.requester \/\/ "unknown"' \.\/request-auth\.json\)/,
+    "publish log must prefer requesterName from request-auth.json",
+  );
+  // The write gate itself stays untouched: authorization is writeAllowed.
+  assert.match(body, /\.writeAllowed == true/);
 });
 
 test("run-investigation-container.sh: stage cleanup is status-neutral and drops to the inv user (issue #57)", () => {

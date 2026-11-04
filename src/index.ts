@@ -22,7 +22,7 @@ import { loadConfig } from "./config.js";
 import type { Config } from "./config.js";
 import { ThreadStore, workdirFor, type ThreadRecord } from "./store.js";
 import Bugsnag from "@bugsnag/js";
-import { editStatus, fetchThreadContext, postFindings, postStatus, react, stripMention, threadContextDoc, threadDeeplink } from "./slack.js";
+import { editStatus, fetchThreadContext, postFindings, postStatus, react, resolveUserName, stripMention, threadContextDoc, threadDeeplink } from "./slack.js";
 import { InvestigationError, runInvestigation, activeInvestigations } from "./investigate.js";
 import { downloadAttachments, type SlackFile } from "./attachments.js";
 import { RunQueue, QueueFullError } from "./queue.js";
@@ -239,11 +239,18 @@ async function main(): Promise<void> {
           const runQ = [dl.args.join(" "), question].filter(Boolean).join(" ");
           if (runQ) runQuestion = runQ;
         }
+        // Issue #69: resolve the requester's display name from Slack itself
+        // (users.info, cached per id) so request-auth.json carries the
+        // authoritative name — the model never maps ids to names via
+        // AGENTS.md prose, which once mislabeled an admin "Matt" and
+        // produced a bogus publish-gate refusal.
+        const requesterName = await resolveUserName(slack, event.user);
         const { answer } = await runInvestigation(cfg, {
           question: runQuestion,
           sessionId: record.sessionId,
           workdir: record.workdir,
           requester: event.user,
+          requesterName,
           // Slack-authenticated gate — lands in request-auth.json in the
           // case workdir, which the operator prompt + helper scripts trust.
           writeAllowed: WRITE_GATE.includes(event.user),

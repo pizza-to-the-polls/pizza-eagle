@@ -182,7 +182,14 @@ export function ensureCaseWorkdirPerms(workdir: string): void {
 
 export async function runInvestigation(
   cfg: Config,
-  opts: { question: string; sessionId: string; workdir: string; requester?: string; writeAllowed?: boolean },
+  opts: {
+    question: string;
+    sessionId: string;
+    workdir: string;
+    requester?: string;
+    requesterName?: string;
+    writeAllowed?: boolean;
+  },
 ): Promise<InvestigationResult> {
   validateRunInputs(opts);
 
@@ -211,6 +218,7 @@ export async function runInvestigation(
   // gate on Slack-authenticated identity, never on question text.
   writeRequestAuth(workdir, {
     requester: opts.requester,
+    requesterName: opts.requesterName,
     writeAllowed: opts.writeAllowed,
   });
 
@@ -226,7 +234,7 @@ export async function runInvestigation(
   // even on a thread's FIRST question. (2026-10-25 #dev thread: a publish
   // request rode Q1 and the gate found no entry — entries were previously
   // appended only after each run.) Best-effort: never fail a run over it.
-  tryHistory(() => openHistory(workdir, opts.question, opts.requester));
+  tryHistory(() => openHistory(workdir, opts.question, opts.requester, opts.requesterName));
 
   const started = Date.now();
   // The wrapper owns everything below this point: privilege drop, staging
@@ -311,7 +319,7 @@ export async function runInvestigation(
  */
 export function writeRequestAuth(
   workdir: string,
-  auth: { requester?: string; writeAllowed?: boolean },
+  auth: { requester?: string; requesterName?: string; writeAllowed?: boolean },
 ): void {
   mkdirSync(workdir, { recursive: true });
   writeFileSync(
@@ -319,6 +327,10 @@ export function writeRequestAuth(
     JSON.stringify(
       {
         requester: auth.requester ?? null,
+        // Slack-resolved display name (users.info via the bot token, issue
+        // #69). The ONLY authoritative name: AGENTS.md prose mappings are
+        // decoration and must never be used to label a requester.
+        requesterName: auth.requesterName ?? null,
         writeAllowed: Boolean(auth.writeAllowed),
         ts: new Date().toISOString(),
       },
@@ -343,9 +355,13 @@ export function openHistory(
   workdir: string,
   question: string,
   requester?: string,
+  requesterName?: string,
 ): void {
   const stamp = new Date().toISOString();
-  const who = requester ? `\n**Requester:** Slack member \`${requester}\`\n` : "\n";
+  const namePart = requesterName ? ` (${requesterName})` : "";
+  const who = requester
+    ? `\n**Requester:** Slack member \`${requester}\`${namePart}\n`
+    : "\n";
   appendFileSync(`${workdir}/case-history.md`, `## ${stamp}\n${who}**Q:** ${question}\n\n`);
 }
 
