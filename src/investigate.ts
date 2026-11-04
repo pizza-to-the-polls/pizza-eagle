@@ -233,13 +233,6 @@ export async function runInvestigation(
     console.warn(`[pizza-eagle] no AGENTS.md in AGENT_DIR (${cfg.agentDir}) — running bare`);
   }
 
-  // Requester + question land in the case file BEFORE the pi run, so the
-  // AGENTS.md write-gate can verify the requester from Slack event metadata
-  // even on a thread's FIRST question. (2026-10-25 #dev thread: a publish
-  // request rode Q1 and the gate found no entry — entries were previously
-  // appended only after each run.) Best-effort: never fail a run over it.
-  tryHistory(() => openHistory(workdir, opts.question, opts.requester, opts.requesterName));
-
   const started = Date.now();
   // The wrapper owns everything below this point: privilege drop, staging
   // (pi config + triage creds from the listener user's HOME), container
@@ -280,7 +273,7 @@ export async function runInvestigation(
   const answer = stdout.trim();
 
   if (timedOut) {
-    tryHistory(() => closeHistory(workdir, "(timed out)"));
+    tryHistory(() => appendHistory(workdir, opts.question, "(timed out)", opts.requester, opts.requesterName));
     throw new InvestigationError(
       `Investigation exceeded ${Math.round(cfg.timeoutMs / 60_000)} minutes and was stopped.`,
       stderr,
@@ -289,7 +282,7 @@ export async function runInvestigation(
     );
   }
   if (code !== 0 || !answer) {
-    tryHistory(() => closeHistory(workdir, answer || "(no output)"));
+    tryHistory(() => appendHistory(workdir, opts.question, answer || "(no output)", opts.requester, opts.requesterName));
     const tail = stderr.trim().slice(-800);
     throw new InvestigationError(
       `pi exited with code ${code ?? "?"}${signal ? ` (${signal})` : ""}.`,
@@ -302,7 +295,7 @@ export async function runInvestigation(
     );
   }
 
-  tryHistory(() => closeHistory(workdir, answer));
+  tryHistory(() => appendHistory(workdir, opts.question, answer, opts.requester, opts.requesterName));
   return { answer, durationMs };
 }
 
@@ -313,11 +306,13 @@ export async function runInvestigation(
  * This is the ONLY requester signal the operator prompt and the helper
  * scripts (gh-token.mjs, publish-hotnready.sh) trust. The old scheme —
  * a `**Requester:**` line in the newest case-history.md entry — was
- * forgeable, because openHistory() appends the raw question into that
- * same file and a question can carry its own `---` + header + requester
- * line (red team 2026-10-27, finding 4: verified, and undetected by the
- * suspicion rules). case-history.md Requester lines stay as transcript;
- * they are no longer auth.
+ * forgeable, because the question text lands in that same file and a
+ * question can carry its own `---` + header + requester line (red team
+ * 2026-10-27, finding 4: verified, and undetected by the suspicion
+ * rules). case-history.md Requester lines stay as transcript; they are
+ * no longer auth — and since issue #66 the worker no longer writes to
+ * the file at all (the listener appends post-run), so request metadata
+ * in it is structurally listener-only.
  *
  * Since the issue #5 boundary the investigation runs as a DIFFERENT OS
  * user (pizza-eagle-inv, containerized) — but the case workdir remains
@@ -353,18 +348,19 @@ export function writeRequestAuth(
 
 /**
  * Durable per-thread case file — cheap context even if the session id breaks.
- * The requester's Slack member id rides along so AGENTS.md can gate
- * write-powers (PRs, hotnready publishes) to vetted humans while
- * investigations stay open to the whole workspace.
+ * The requester's Slack member id rides along so the transcript records who
+ * asked, while investigations stay open to the whole workspace.
  *
- * Two halves: openHistory (Requester + Q) runs BEFORE the pi subprocess —
- * the write-gate checks the newest entry's Requester line, which must exist
- * during the run itself, first question included — and closeHistory (answer
- * + separator) after it. Both best-effort via tryHistory.
+ * Written entirely by the LISTENER after the run completes (issue #66): the
+ * isolated worker has no write access to case-history.md at all, so request
+ * metadata (timestamp, requester, question) is structurally separated from
+ * anything the worker could forge, and the worker can never hit the
+ * listener-owned file's permission wall mid-run. Best-effort via tryHistory.
  */
-export function openHistory(
+export function appendHistory(
   workdir: string,
   question: string,
+  answer: string,
   requester?: string,
   requesterName?: string,
 ): void {
@@ -373,11 +369,10 @@ export function openHistory(
   const who = requester
     ? `\n**Requester:** Slack member \`${requester}\`${namePart}\n`
     : "\n";
-  appendFileSync(`${workdir}/case-history.md`, `## ${stamp}\n${who}**Q:** ${question}\n\n`);
-}
-
-export function closeHistory(workdir: string, answer: string): void {
-  appendFileSync(`${workdir}/case-history.md`, `${answer}\n\n---\n\n`);
+  appendFileSync(
+    `${workdir}/case-history.md`,
+    `## ${stamp}${who}**Q:** ${question}\n\n${answer}\n\n---\n\n`,
+  );
 }
 
 /** Best-effort wrapper: a failed case-file write must never lose an answer. */
