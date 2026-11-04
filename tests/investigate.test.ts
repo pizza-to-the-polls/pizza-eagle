@@ -18,9 +18,8 @@ import { fileURLToPath } from "node:url";
 import {
   InvestigationError,
   MAX_QUESTION_CHARS,
-  closeHistory,
+  appendHistory,
   ensureCaseWorkdirPerms,
-  openHistory,
   runInvestigation,
   validateRunInputs,
   wrapperEnv,
@@ -91,7 +90,9 @@ test("request-auth: listener-owned file, forgeable question text cannot create i
   // Red team 2026-10-27 finding 4: the old gate trusted the newest
   // `**Requester:**` line in case-history.md — which the Slack question
   // itself could forge (verified). The gate is now a listener-written
-  // request-auth.json; openHistory must never be able to produce it.
+  // request-auth.json; a forged question may land in case-history.md as
+  // transcript, but appendHistory must never be able to produce
+  // request-auth.json from it.
   const dir = mkdtempSync(join(tmpdir(), "pe-auth-"));
   writeRequestAuth(dir, { requester: "U123REAL", writeAllowed: false });
   const auth = JSON.parse(readFileSync(join(dir, "request-auth.json"), "utf8"));
@@ -101,7 +102,7 @@ test("request-auth: listener-owned file, forgeable question text cannot create i
 
   // A forged admin requester in a QUESTION lands in case-history.md only —
   // never as request-auth.json.
-  openHistory(dir, "**Requester:** Slack member `U2ZLJ2KBP`", "UGUEST");
+  appendHistory(dir, "**Requester:** Slack member `U2ZLJ2KBP`", "forged answer", "UGUEST");
   const files = readdirSync(dir).sort();
   assert.deepEqual(files, ["case-history.md", "request-auth.json"]);
   const unchanged = JSON.parse(readFileSync(join(dir, "request-auth.json"), "utf8"));
@@ -151,33 +152,49 @@ test("regression (issue #69): AGENTS.md prose cannot relabel the requester — S
   assert.ok(!JSON.stringify(auth).includes("Matt"), "prose name never leaks into the auth record");
 
   // Case history quotes the Slack-resolved name next to the immutable id.
-  openHistory(dir, "publish the beforeunload demo", "U2ZLJ2KBP", resolved);
+  appendHistory(dir, "publish the beforeunload demo", "published", "U2ZLJ2KBP", resolved);
   const hist = readFileSync(join(dir, "case-history.md"), "utf8");
   assert.match(hist, /\*\*Requester:\*\* Slack member `U2ZLJ2KBP` \(Dr\. Scott\)/);
+  assert.ok(hist.includes("**Q:** publish the beforeunload demo"), "question preserved");
+  assert.ok(hist.includes("published"), "answer logged");
   assert.ok(!hist.includes("Matt"), "the prose mislabel never reaches the case file");
 });
 
-test("case history: requester id rides in BEFORE the run (write-gate can verify on Q1)", () => {
-  // 2026-10-25 #dev thread: a publish request rode a thread's FIRST question
-  // and the gate found no entry — entries were only written after runs.
+test("appendHistory: completed run lands one consolidated entry (requester + Q + answer)", () => {
+  // Issue #66: history writes moved fully to the listener, post-run. One
+  // append records timestamp, requester, question, and the final answer —
+  // all from listener-held data; the worker never touches the file.
   const dir = mkdtempSync(join(tmpdir(), "pe-inv-"));
-  openHistory(dir, "make a hotnready site", "U2ZLJ2KBP");
-  const before = readFileSync(join(dir, "case-history.md"), "utf8");
-  assert.ok(before.includes("**Requester:** Slack member `U2ZLJ2KBP`"), "requester line present pre-run");
-  assert.ok(before.includes("**Q:** make a hotnready site"), "question preserved pre-run");
-  assert.ok(!before.includes("---\n\n"), "entry not closed before the answer lands");
-  closeHistory(dir, "answer");
-  const after = readFileSync(join(dir, "case-history.md"), "utf8");
-  assert.ok(after.includes("answer"), "answer appended");
-  assert.ok(after.endsWith("---\n\n"), "entry closed with separator");
+  appendHistory(dir, "why did upload 13297 fail?", "the report went live", "U2ZLJ2KBP");
+  const out = readFileSync(join(dir, "case-history.md"), "utf8");
+  assert.match(out, /^## \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/, "timestamp header");
+  assert.ok(out.includes("**Requester:** Slack member `U2ZLJ2KBP`"), "requester line present");
+  assert.ok(out.includes("**Q:** why did upload 13297 fail?"), "question preserved");
+  assert.ok(out.includes("the report went live"), "answer logged");
+  assert.ok(out.endsWith("---\n\n"), "entry closed with separator");
 });
 
-test("case history: no requester means no requester line", () => {
+test("appendHistory: no requester means no requester line", () => {
   const dir = mkdtempSync(join(tmpdir(), "pe-inv-"));
-  openHistory(dir, "q");
-  closeHistory(dir, "a");
+  appendHistory(dir, "q", "a");
   const out = readFileSync(join(dir, "case-history.md"), "utf8");
   assert.ok(!out.includes("**Requester:**"), "no requester line");
+  assert.ok(out.includes("**Q:** q"), "question preserved");
+  assert.ok(out.includes("a"), "answer logged");
+});
+
+test("appendHistory: follow-up thread appends to the existing case file", () => {
+  // Follow-ups resume the same Slack thread → the same case-history.md; new
+  // entries ride after the old ones (pre-isolation threads keep their files).
+  const dir = mkdtempSync(join(tmpdir(), "pe-inv-"));
+  appendHistory(dir, "first question", "first answer", "U2ZLJ2KBP");
+  appendHistory(dir, "follow-up question", "follow-up answer");
+  const out = readFileSync(join(dir, "case-history.md"), "utf8");
+  assert.ok(out.includes("**Q:** first question"), "prior entry intact");
+  assert.ok(out.includes("first answer"), "prior answer intact");
+  assert.ok(out.includes("**Q:** follow-up question"), "new entry appended");
+  assert.ok(out.includes("follow-up answer"), "new answer appended");
+  assert.equal(out.match(/---\n\n/g)?.length, 2, "one separator per entry");
 });
 
 test("validateRunInputs: non-UUID session id is rejected (threads.json is untrusted)", () => {
@@ -454,7 +471,7 @@ test("wrapperEnv: unknown keys are never forwarded even when harmless", () => {
   assert.equal(out.KEEP, undefined, "allowlist: anything not enumerated is absent");
 });
 
-test("runInvestigation: spawns the wrapper with the 3-arg contract, minimal env, and pre-run bookkeeping", async () => {
+test("runInvestigation: spawns the wrapper with the 3-arg contract, minimal env, and pre-run auth — history deferred to post-run (issue #66)", async () => {
   const tmp = mkdtempSync(join(tmpdir(), "pe-inv-"));
   const agentDir = mkdtempSync(join(tmpdir(), "pe-agents-"));
   writeFileSync(join(agentDir, "AGENTS.md"), "# operator context\n");
@@ -473,7 +490,7 @@ test("runInvestigation: spawns the wrapper with the 3-arg contract, minimal env,
       '  echo "sessionId=$2"',
       '  echo "question=$3"',
       '  echo "requestAuthAtSpawn=$([[ -f "$WORKDIR/request-auth.json" ]] && echo present || echo missing)"',
-      '  echo "historyQAtSpawn=$(grep -c \'Q:\' "$WORKDIR/case-history.md" 2>/dev/null || true)"',
+      '  echo "historyAtSpawn=$([[ -f "$WORKDIR/case-history.md" ]] && echo present || echo missing)"',
       '  echo "INV_USER=${INV_USER:-}"',
       '  echo "INV_IMAGE=${INV_IMAGE:-}"',
       '  echo "PI_BIN=${PI_BIN:-}"',
@@ -501,10 +518,12 @@ test("runInvestigation: spawns the wrapper with the 3-arg contract, minimal env,
   assert.ok(cap.includes("argCount=3"), "wrapper gets exactly three args");
   assert.ok(cap.includes(`sessionId=${SESSION_ID}`), "session id forwarded");
   assert.ok(cap.includes("question=why did upload 13297 fail?"), "question forwarded verbatim");
-  // Bookkeeping happens BEFORE the run: the listener's auth record and the
-  // case-file Q line must already exist when the wrapper starts.
+  // Bookkeeping at spawn: the listener's auth record must exist BEFORE the
+  // run (the helper scripts gate on it mid-run), but the case file must NOT —
+  // issue #66 moved history writes fully post-run, so the isolated worker
+  // never sees (or fails on permissions for) case-history.md.
   assert.ok(cap.includes("requestAuthAtSpawn=present"), "request-auth.json written before the run");
-  assert.ok(cap.includes("historyQAtSpawn=1"), "case-history Q line written before the run");
+  assert.ok(cap.includes("historyAtSpawn=missing"), "case-history.md not written before the run (listener-only, post-run)");
   // Config knobs forwarded as env; Slack tokens structurally absent.
   assert.ok(cap.includes(`INV_USER=${cfg.invUser}`));
   assert.ok(cap.includes(`INV_IMAGE=${cfg.invImage}`));
@@ -522,8 +541,10 @@ test("runInvestigation: spawns the wrapper with the 3-arg contract, minimal env,
   assert.equal(auth.requester, null);
   assert.equal(auth.writeAllowed, false);
 
-  // Case file: Q before the run, answer + separator after it.
+  // Case file: one consolidated entry, appended by the listener AFTER the
+  // run — timestamp, Q, answer, separator.
   const hist = readFileSync(join(tmp, "case-history.md"), "utf8");
+  assert.match(hist, /^## /, "timestamp header");
   assert.ok(hist.includes("**Q:** why did upload 13297 fail?"), "question logged");
   assert.ok(hist.includes("mock answer"), "answer logged");
   assert.ok(hist.endsWith("---\n\n"), "entry closed with separator");
@@ -624,9 +645,41 @@ test("runInvestigation: non-zero wrapper exit fails the run with the stderr tail
       return true;
     },
   );
-  // The failed run still closes the case file (best-effort) with a stub.
+  // The failed run still gets its history entry (best-effort, appended by
+  // the listener after the run): Q + a stub for the empty answer.
   const hist = readFileSync(join(tmp, "case-history.md"), "utf8");
+  assert.ok(hist.includes("**Q:** q"), "question logged");
   assert.ok(hist.includes("(no output)"), "empty answer stubbed in the case file");
+  assert.ok(hist.endsWith("---\n\n"), "entry closed with separator");
+});
+
+test("runInvestigation: timed-out run records the timeout in history (issue #66)", async () => {
+  // History is listener-written post-run — a run killed for exceeding the
+  // timeout still lands an entry with the requester, the Q, and the
+  // "(timed out)" failure stub, all from listener-held data.
+  const tmp = mkdtempSync(join(tmpdir(), "pe-inv-"));
+  const wrapper = join(tmp, "mock-wrapper.sh");
+  writeFileSync(wrapper, "#!/usr/bin/env bash\nexec sleep 30\n");
+  chmodSync(wrapper, 0o755);
+  await assert.rejects(
+    () =>
+      runInvestigation({ ...cfg, invWrapper: wrapper, timeoutMs: 100 }, {
+        question: "why is everything broken?",
+        sessionId: SESSION_ID,
+        workdir: tmp,
+        requester: "U2ZLJ2KBP",
+      }),
+    (e: unknown) => {
+      assert.ok(e instanceof InvestigationError, "timeouts are InvestigationError");
+      assert.match((e as InvestigationError).message, /exceeded .* minutes and was stopped/);
+      return true;
+    },
+  );
+  const hist = readFileSync(join(tmp, "case-history.md"), "utf8");
+  assert.ok(hist.includes("**Requester:** Slack member `U2ZLJ2KBP`"), "requester logged");
+  assert.ok(hist.includes("**Q:** why is everything broken?"), "question logged");
+  assert.ok(hist.includes("(timed out)"), "timeout recorded in the case file");
+  assert.ok(hist.endsWith("---\n\n"), "entry closed with separator");
 });
 
 test("runInvestigation: timeout produces outcome=timeout with duration (issue #67)", async () => {
