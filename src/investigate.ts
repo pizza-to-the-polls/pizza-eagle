@@ -39,6 +39,10 @@ export class InvestigationError extends Error {
   constructor(
     message: string,
     public readonly stderr: string,
+    /** Wall-clock run duration — feeds the usage ledger's answer event. */
+    public readonly durationMs?: number,
+    /** How the run ended (issue #67): timeout / error / killed by signal. */
+    public readonly outcome?: "timeout" | "error" | "killed",
   ) {
     super(message);
   }
@@ -280,6 +284,8 @@ export async function runInvestigation(
     throw new InvestigationError(
       `Investigation exceeded ${Math.round(cfg.timeoutMs / 60_000)} minutes and was stopped.`,
       stderr,
+      durationMs,
+      "timeout",
     );
   }
   if (code !== 0 || !answer) {
@@ -288,6 +294,11 @@ export async function runInvestigation(
     throw new InvestigationError(
       `pi exited with code ${code ?? "?"}${signal ? ` (${signal})` : ""}.`,
       tail,
+      durationMs,
+      // A non-null signal means the wrapper died by signal (spawn 'error'
+      // yields [null, null] — reported as "code ?" below) — call it killed,
+      // everything else is an ordinary error.
+      signal ? "killed" : "error",
     );
   }
 

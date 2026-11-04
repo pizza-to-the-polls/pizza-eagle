@@ -245,7 +245,7 @@ async function main(): Promise<void> {
         // AGENTS.md prose, which once mislabeled an admin "Matt" and
         // produced a bogus publish-gate refusal.
         const requesterName = await resolveUserName(slack, event.user);
-        const { answer } = await runInvestigation(cfg, {
+        const { answer, durationMs } = await runInvestigation(cfg, {
           question: runQuestion,
           sessionId: record.sessionId,
           workdir: record.workdir,
@@ -254,6 +254,22 @@ async function main(): Promise<void> {
           // Slack-authenticated gate — lands in request-auth.json in the
           // case workdir, which the operator prompt + helper scripts trust.
           writeAllowed: WRITE_GATE.includes(event.user),
+        });
+        // Usage ledger (issue #67): the completion half of the question
+        // event. Duration/outcome/model turn "how long do answers take? /
+        // what's the real failure rate?" into a one-line jq over
+        // usage.jsonl. cfg.piModel is undefined without a PI_MODEL override
+        // — the field is then omitted from the JSON line (model unknown).
+        // tokens stays reserved until pi exposes per-run usage.
+        appendUsage(cfg.stateDir, {
+          ts: new Date().toISOString(),
+          event: "answer",
+          requester: event.user,
+          channel: event.channel,
+          case: record.sessionId.slice(0, 8),
+          durationMs,
+          outcome: "ok",
+          model: cfg.piModel,
         });
         if (statusTs) {
           await editStatus(slack, event.channel, statusTs, ":white_check_mark: Investigation finished.");
@@ -267,6 +283,21 @@ async function main(): Promise<void> {
         };
         store.put(threadTs, record);
       } catch (e) {
+        // Usage ledger (issue #67): failed runs still pair their question
+        // event with an answer event — outcome + duration + a truncated
+        // stderr tail, so the failure rate in the ledger matches reality.
+        const inv = e instanceof InvestigationError ? e : undefined;
+        appendUsage(cfg.stateDir, {
+          ts: new Date().toISOString(),
+          event: "answer",
+          requester: event.user,
+          channel: event.channel,
+          case: record.sessionId.slice(0, 8),
+          durationMs: inv?.durationMs,
+          outcome: inv?.outcome ?? "error",
+          model: cfg.piModel,
+          errorTail: inv?.stderr?.length ? inv.stderr.slice(-200) : undefined,
+        });
         const detail =
           e instanceof InvestigationError
             ? `${e.message}\n\`\`\`${e.stderr.slice(0, 500)}\n\`\`\``
