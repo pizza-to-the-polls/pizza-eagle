@@ -222,19 +222,18 @@ aws ec2 associate-address --instance-id "$INSTANCE_ID" \
 
 #### 9. Services
 # notify-failure@ must be present before any OnFailure= reference resolves.
-install -d /etc/systemd/system
-install -m 644 "$PTP_BOT_HOME/systemd/notify-failure@.service" \
-  "$PTP_BOT_HOME/systemd/pizza-eagle.service" \
-  "$PTP_BOT_HOME/systemd/pizza-eagle-update.service" \
-  "$PTP_BOT_HOME/systemd/pizza-eagle-update.timer" \
-  "$PTP_BOT_HOME/systemd/pizza-eagle-backup.service" \
-  "$PTP_BOT_HOME/systemd/pizza-eagle-backup.timer" \
-  "$PTP_BOT_HOME/systemd/pizza-eagle-prune.service" \
-  "$PTP_BOT_HOME/systemd/pizza-eagle-prune.timer" \
-  "$PTP_BOT_HOME/systemd/pizza-eagle-selfcheck.service" \
-  "$PTP_BOT_HOME/systemd/pizza-eagle-selfcheck.timer" \
-  /etc/systemd/system/
-systemctl daemon-reload
+# install-units.sh installs EVERY repo unit — verify-first, idempotent, one
+# daemon-reload only when something changed — instead of a hand-maintained
+# list that silently misses units (2026-11-04: a 15:13 UTC re-provision
+# installed only the nine listed units; pizza-eagle-investigation-net.service
+# was absent and the 17:00 self-check flagged unit drift until the next
+# nightly update ExecStartPost caught up). §3b already guarantees its
+# prerequisites (inv user + iptables for the verify) by this point.
+# Enablement stays HERE: install-units.sh deliberately enables nothing —
+# pizza-eagle-investigation-net.service is installed but NOT enabled
+# (defense-in-depth; enable deliberately after rule review, see its unit
+# file [Install] comment).
+"$PTP_BOT_HOME/scripts/install-units.sh"
 systemctl enable --now pizza-eagle.service pizza-eagle-update.timer pizza-eagle-backup.timer pizza-eagle-prune.timer pizza-eagle-selfcheck.timer
 
 #### 10. CloudWatch agent — bot.log → /pizza-eagle/bot (box logs are
