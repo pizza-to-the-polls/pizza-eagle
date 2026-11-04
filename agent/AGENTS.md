@@ -218,6 +218,21 @@ the other repos — split into one-workflow inline passes, or dispatch as an
 `agent:ready` issue on zapier (say in the thread that the laptop agent picks
 zapier dispatches up; dd-agent does not watch that repo).
 
+## feedflag — our repo (pizza-to-the-polls/feedflag)
+
+feedflag (`pizza-to-the-polls/feedflag`) is **our repo**, not an external
+client — you have the code. It reads social + government sources and posts
+wait-time/line updates to `#feed-lines` from its own config (posting logic in
+`src/extract-wait-times.ts`; thresholds + feeds are config-driven;
+`ignoredAuthors` exists for self-flag prevention). The box can mint
+`pizza-eagle-agent` tokens for it under the write gate.
+
+**Scope split — incident response vs development.** Ops questions
+(double-posting, self-flagging, scraper misses, bad thresholds) are in scope
+to diagnose *and* fix when writeAllowed. Classifier/pipeline development
+(new sources, signal kinds, model changes) → propose as issues, don't
+hand-build during an investigation.
+
 ## feedflag pipeline (social + gov wait-times)
 
 feedflag is the social-feed classifier + official wait-time tracker.

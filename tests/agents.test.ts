@@ -143,6 +143,70 @@ test("AGENTS.md: inline PR flow is gated by routing (small ~20-min single-repo s
   );
 });
 
+test("AGENTS.md: feedflag is declared as our own repo with the ops-vs-development scope split", () => {
+  // The 2026-10-24 and 2026-10-26 asks were mis-answered with "feedflag is
+  // an external client, we don't have the code for it — ask the owner",
+  // even though feedflag is pizza-to-the-polls/feedflag and later runs
+  // fixed real feedflag incidents fine (2026-10-30 self-flagging). The gap
+  // was orientation, not capability — this test keeps the "our repo" claim
+  // and the scope split from regressing out of the copied operator context.
+  const section = agentsMd.slice(
+    agentsMd.indexOf("## feedflag — our repo"),
+    agentsMd.indexOf("## feedflag pipeline"),
+  );
+  assert.ok(section.length > 0, "the 'feedflag — our repo' section must exist before the pipeline details");
+  assert.match(
+    section,
+    /pizza-to-the-polls\/feedflag/,
+    "must name the feedflag repo (the agent answers as if it owns it)",
+  );
+  assert.match(
+    section,
+    /our repo\*\*/i,
+    "must state feedflag is our repo — not an external client",
+  );
+  assert.match(
+    section,
+    /#feed-lines/,
+    "must name the channel feedflag posts wait-time/line updates to",
+  );
+  assert.match(
+    section,
+    /src\/extract-wait-times\.ts/,
+    "must point at the posting logic so investigations start from the code",
+  );
+  assert.match(
+    section,
+    /ignoredAuthors/,
+    "must mention ignoredAuthors (self-flag prevention lever, 2026-10-30 ask)",
+  );
+  assert.match(
+    section,
+    /pizza-eagle-agent/,
+    "must say the box can mint pizza-eagle-agent tokens for feedflag under the write gate",
+  );
+  assert.match(
+    section,
+    /diagnose\s*\*and\*\s+fix/i,
+    "ops questions must be in scope to diagnose AND fix, not just diagnose",
+  );
+  assert.match(
+    section,
+    /propose as issues/,
+    "classifier/pipeline development must be proposed as issues, not hand-built",
+  );
+  // The old mis-answer framing must not appear anywhere outside this
+  // section (inside it, "not an external client" is the deliberate
+  // counter-claim to the 2026-10-24 redirect).
+  const beforeSection = agentsMd.slice(0, agentsMd.indexOf("## feedflag — our repo"));
+  const afterSection = agentsMd.slice(agentsMd.indexOf("## feedflag pipeline"));
+  assert.doesNotMatch(
+    beforeSection + afterSection,
+    /external client/i,
+    "AGENTS.md must never describe feedflag as an external client outside the our-repo section",
+  );
+});
+
 /**
  * The dispatch skill carries the issue-body template + PII checklist that
  * keep AGENTS.md lean (routing decisions in AGENTS.md, mechanics in the
