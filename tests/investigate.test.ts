@@ -20,7 +20,9 @@ import {
   MAX_QUESTION_CHARS,
   appendHistory,
   ensureCaseWorkdirPerms,
+  oneLinerCause,
   runInvestigation,
+  runWithRetry,
   validateRunInputs,
   wrapperEnv,
   writeRequestAuth,
@@ -707,6 +709,166 @@ test("runInvestigation: timeout produces outcome=timeout with duration (issue #6
   );
   const hist = readFileSync(join(tmp, "case-history.md"), "utf8");
   assert.ok(hist.includes("(timed out)"), "case file closed with the timeout stub");
+});
+
+// ── Auto-retry + failure-cause reporting (issue #68) ────────────────────────
+
+/** Mock wrapper that fails its first invocation and answers thereafter. */
+function writeFlakyWrapper(dir: string, failureCount: number, stderrLine = "mock: model API error: 429"): string {
+  const p = join(dir, "flaky-wrapper.sh");
+  writeFileSync(
+    p,
+    [
+      "#!/usr/bin/env bash",
+      'WORKDIR="$1"',
+      'n=$(cat "$WORKDIR/attempts" 2>/dev/null || echo 0)',
+      "n=$((n+1))",
+      'echo "$n" > "$WORKDIR/attempts"',
+      `if [ "$n" -le ${failureCount} ]; then echo "${stderrLine}" >&2; exit 1; fi`,
+      'echo "recovered answer"',
+      "",
+    ].join("\n"),
+  );
+  chmodSync(p, 0o755);
+  return p;
+}
+
+function attemptsOf(dir: string): number {
+  return Number(readFileSync(join(dir, "attempts"), "utf8").trim());
+}
+
+test("runWithRetry: retry-then-succeed posts one answer from the second attempt (issue #68)", async () => {
+  // v1 surfaced ~11% transient failures (API 429s, blips) as terminal ❌s;
+  // the auto-retry must turn a first-attempt error into a normal answer.
+  const tmp = mkdtempSync(join(tmpdir(), "pe-retry-"));
+  const wrapper = writeFlakyWrapper(tmp, 1);
+  const retries: InvestigationError[] = [];
+  const { answer } = await runWithRetry(
+    { ...cfg, invWrapper: wrapper },
+    { question: "q", sessionId: SESSION_ID, workdir: tmp },
+    { onRetry: (e) => retries.push(e), backoffMs: 1 },
+  );
+  assert.equal(answer, "recovered answer", "the second attempt's answer is returned");
+  assert.equal(attemptsOf(tmp), 2, "exactly one extra attempt was made");
+  assert.equal(retries.length, 1, "onRetry fired once");
+  assert.ok(retries[0] instanceof InvestigationError);
+  assert.equal(retries[0].outcome, "error");
+  // Both attempts land in the case file (failure stub + the real answer) —
+  // the transcript shows the retry happened.
+  const hist = readFileSync(join(tmp, "case-history.md"), "utf8");
+  assert.ok(hist.includes("(no output)"), "attempt 1's failure stub is recorded");
+  assert.ok(hist.includes("recovered answer"), "attempt 2's answer is recorded");
+});
+
+test("runWithRetry: retry-then-fail surfaces the second attempt's error (issue #68)", async () => {
+  const tmp = mkdtempSync(join(tmpdir(), "pe-retry-"));
+  const wrapper = writeFlakyWrapper(tmp, 99, "mock: upstream unreachable");
+  const retries: InvestigationError[] = [];
+  await assert.rejects(
+    () =>
+      runWithRetry(
+        { ...cfg, invWrapper: wrapper },
+        { question: "q", sessionId: SESSION_ID, workdir: tmp },
+        { onRetry: (e) => retries.push(e), backoffMs: 1 },
+      ),
+    (e: unknown) => {
+      assert.ok(e instanceof InvestigationError, "terminal failure is InvestigationError");
+      assert.equal((e as InvestigationError).outcome, "error");
+      assert.match((e as InvestigationError).stderr, /upstream unreachable/);
+      return true;
+    },
+  );
+  assert.equal(retries.length, 1, "onRetry fired exactly once — no third attempt");
+  assert.equal(attemptsOf(tmp), 2, "hard cap of two attempts");
+});
+
+test("runWithRetry: timeouts are NOT retried (issue #68)", async () => {
+  // A run that consumed the whole wall-clock budget would need it all again
+  // for the same investigative scope — retrying just doubles the wait.
+  const tmp = mkdtempSync(join(tmpdir(), "pe-retry-"));
+  const wrapper = join(tmp, "slow-wrapper.sh");
+  writeFileSync(wrapper, "#!/usr/bin/env bash\nsleep 30\n");
+  chmodSync(wrapper, 0o755);
+  let onRetryCalls = 0;
+  const t0 = Date.now();
+  await assert.rejects(
+    () =>
+      runWithRetry(
+        { ...cfg, invWrapper: wrapper, timeoutMs: 150 },
+        { question: "q", sessionId: SESSION_ID, workdir: tmp },
+        { onRetry: () => onRetryCalls++, backoffMs: 1 },
+      ),
+    (e: unknown) => {
+      assert.ok(e instanceof InvestigationError);
+      assert.equal((e as InvestigationError).outcome, "timeout");
+      return true;
+    },
+  );
+  assert.equal(onRetryCalls, 0, "timeout never triggers onRetry");
+  assert.ok(Date.now() - t0 < 5_000, "returned after ONE attempt, not two");
+  assert.ok(!existsSync(join(tmp, "attempts")), "no retry attempt was spawned");
+});
+
+test("runWithRetry: success on the first try never retries (issue #68)", async () => {
+  const tmp = mkdtempSync(join(tmpdir(), "pe-retry-"));
+  const wrapper = join(tmp, "ok-wrapper.sh");
+  writeFileSync(wrapper, "#!/usr/bin/env bash\necho fine\n");
+  chmodSync(wrapper, 0o755);
+  let onRetryCalls = 0;
+  const { answer } = await runWithRetry(
+    { ...cfg, invWrapper: wrapper },
+    { question: "q", sessionId: SESSION_ID, workdir: tmp },
+    { onRetry: () => onRetryCalls++, backoffMs: 1 },
+  );
+  assert.equal(answer, "fine");
+  assert.equal(onRetryCalls, 0);
+});
+
+test("runWithRetry: shouldRetry gate wins — a shutdown mid-run spawns no second attempt", async () => {
+  // Restart-shutdown SIGTERMs the child (outcome 'killed'); the listener
+  // must not spawn a doomed second attempt during the 2s exit window.
+  const tmp = mkdtempSync(join(tmpdir(), "pe-retry-"));
+  const wrapper = writeFlakyWrapper(tmp, 1);
+  let onRetryCalls = 0;
+  await assert.rejects(
+    () =>
+      runWithRetry(
+        { ...cfg, invWrapper: wrapper },
+        { question: "q", sessionId: SESSION_ID, workdir: tmp },
+        { onRetry: () => onRetryCalls++, shouldRetry: () => false, backoffMs: 1 },
+      ),
+    InvestigationError,
+  );
+  assert.equal(onRetryCalls, 0, "gated retry never calls onRetry");
+  assert.equal(attemptsOf(tmp), 1);
+});
+
+test("oneLinerCause: pulls the real cause from the stderr tail (issue #68)", () => {
+  // 'pi exited with code 1.' is not a cause — the stderr's last error-ish
+  // line is (pi prints the fatal one last).
+  const err = new InvestigationError(
+    "pi exited with code 1.",
+    "[wrapper] staging ok\nsome noise\nError: model API error: 429 Too Many Requests",
+    4_000,
+    "error",
+  );
+  assert.equal(oneLinerCause(err), "Error: model API error: 429 Too Many Requests");
+});
+
+test("oneLinerCause: killed / timeout / unknown errors each render one line", () => {
+  assert.equal(
+    oneLinerCause(new InvestigationError("pi exited with code ? (SIGTERM).", "", 100, "killed")),
+    "investigation process was killed",
+  );
+  const timeout = new InvestigationError("Investigation exceeded 20 minutes and was stopped.", "", 20 * 60_000, "timeout");
+  assert.equal(oneLinerCause(timeout), "Investigation exceeded 20 minutes and was stopped.");
+  // Non-InvestigationError throws (validation, Slack-side) still get a line.
+  assert.equal(oneLinerCause(new Error("boom\nsecond line")), "unexpected error: boom second line");
+  // mrkdwn-hostile characters are stripped; output is capped at 140 chars.
+  const noisy = new InvestigationError("pi exited with code 1.", "Error: `rate limit` **hit** " + "x".repeat(300), 1, "error");
+  const cause = oneLinerCause(noisy);
+  assert.ok(!cause.includes("`") && !cause.includes("*"), "backticks/asterisks stripped for Slack");
+  assert.ok(cause.length <= 140, "one line, capped");
 });
 
 test("runInvestigation: missing wrapper fails fast instead of hanging", async () => {

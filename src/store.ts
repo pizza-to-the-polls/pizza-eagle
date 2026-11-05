@@ -18,6 +18,34 @@ export interface ThreadRecord {
   questionCount: number;
   lastRunAt: string;
   lastAnswer: string | null;
+  /** Slack `ts` of the current 🔎 status message — lets a restart requeue edit it. */
+  statusTs?: string;
+  /**
+   * Question text of the run currently executing (issue #68). Set when a run
+   * starts, CLEARED when it finishes — success or terminal failure (both
+   * inform the user). A record still carrying it after a listener restart is
+   * a run that died mid-flight and gets requeued exactly once.
+   */
+  lastQuestion?: string;
+  /** Slack user id of the most recent requester (for restart requeue). */
+  lastRequester?: string;
+  /** Slack-resolved display name of the most recent requester. */
+  lastRequesterName?: string;
+  /** True while an investigation for this thread is running. */
+  inFlight?: boolean;
+}
+
+/**
+ * Should a listener restart requeue this record's interrupted run? (issue #68)
+ *
+ * True only when a run was in flight AND never completed: `lastQuestion` is
+ * cleared on every completion (success posts the answer; terminal failure
+ * posts the cause + retry offer), so a record that still carries it died
+ * mid-run. A record that completed but crashed before its `finally` cleared
+ * `inFlight` dedupes out here — its answer was already posted.
+ */
+export function needsRestartRequeue(r: ThreadRecord): boolean {
+  return Boolean(r.inFlight) && Boolean(r.lastQuestion);
 }
 
 export class ThreadStore {
@@ -42,6 +70,11 @@ export class ThreadStore {
 
   get(threadTs: string): ThreadRecord | undefined {
     return this.data[threadTs];
+  }
+
+  /** All records currently marked in-flight — the restart-requeue scan. */
+  getInFlight(): Array<[string, ThreadRecord]> {
+    return Object.entries(this.data).filter(([, r]) => Boolean(r.inFlight));
   }
 
   put(threadTs: string, record: ThreadRecord): void {

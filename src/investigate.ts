@@ -299,6 +299,97 @@ export async function runInvestigation(
   return { answer, durationMs };
 }
 
+/** Default pause between attempt 1's failure and the auto-retry. */
+export const RETRY_BACKOFF_MS = 2_000;
+
+export interface RetryOptions {
+  /**
+   * Called between the first failure and the retry — the listener updates
+   * the Slack status ("first attempt failed (…) — retrying…") here.
+   */
+  onRetry?: (error: InvestigationError) => Promise<void> | void;
+  /**
+   * Last-word gate on whether to retry. Index.ts returns `!shuttingDown` so a
+   * SIGTERM'd run (killed by our own restart) does not spawn a doomed second
+   * attempt during the 2s shutdown window.
+   */
+  shouldRetry?: () => boolean;
+  /** Backoff override (tests). */
+  backoffMs?: number;
+}
+
+/**
+ * Auto-retry a failed run ONCE, in the same session/workdir (issue #68).
+ *
+ * v1's ~11% transient failure rate (model API 429s, network blips) surfaced
+ * as terminal bare ❌s. Transient causes usually resolve on a second
+ * attempt, so a non-timeout InvestigationError gets exactly one retry with a
+ * short backoff, reusing the identical run arguments (same pi session, same
+ * case workdir — the retry is a continuation, not a new case).
+ *
+ * Timeouts are EXCLUDED: runInvestigation's wall-clock budget is per
+ * attempt, and a run that consumed all of it would need the same budget
+ * again for the same investigative scope — retrying just doubles the wait
+ * before the same failure. The user still gets the terminal message + retry
+ * offer.
+ *
+ * Only InvestigationError retries: validation/permission throws from
+ * runInvestigation's setup are deterministic — a second attempt fails the
+ * same way, so they surface immediately.
+ */
+export async function runWithRetry(
+  cfg: Config,
+  opts: {
+    question: string;
+    sessionId: string;
+    workdir: string;
+    requester?: string;
+    requesterName?: string;
+    writeAllowed?: boolean;
+  },
+  retry?: RetryOptions,
+): Promise<InvestigationResult> {
+  try {
+    return await runInvestigation(cfg, opts);
+  } catch (e) {
+    const retriable =
+      e instanceof InvestigationError &&
+      e.outcome !== "timeout" &&
+      (retry?.shouldRetry?.() ?? true);
+    if (!retriable) throw e;
+    const first = e as InvestigationError;
+    await retry?.onRetry?.(first);
+    await new Promise((r) => setTimeout(r, retry?.backoffMs ?? RETRY_BACKOFF_MS));
+    return await runInvestigation(cfg, opts);
+  }
+}
+
+/**
+ * One-line human cause for the terminal-failure status edit (issue #68).
+ *
+ * runInvestigation's own message ("pi exited with code 1.") is rarely the
+ * cause — the stderr tail usually carries it ("model API error: 429"). Take
+ * the LAST error-ish stderr line: pi and its tools print the fatal one last.
+ * Stripped of backticks/asterisks (Slack mrkdwn safety) and capped at 140
+ * chars so the status edit stays one line.
+ */
+export function oneLinerCause(e: unknown): string {
+  const clean = (s: string) =>
+    s.replace(/[`*]/g, "").replace(/\s+/g, " ").trim().slice(0, 140) || "unknown error";
+  if (e instanceof InvestigationError) {
+    if (e.outcome === "timeout") return clean(e.message);
+    if (e.outcome === "killed") return "investigation process was killed";
+    const causeLine = e.stderr
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .reverse()
+      .find((l) => /error|failed|429|rate.?limit|too many requests|unreachable|ECONN|ETIMEDOUT/i.test(l));
+    return clean(causeLine ?? e.message);
+  }
+  return clean(`unexpected error: ${(e as Error)?.message ?? String(e)}`);
+}
+
 /**
  * Machine-readable per-run authorization, written by the LISTENER from
  * the Slack event's authenticated user metadata before each pi run.
