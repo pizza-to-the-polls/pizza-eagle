@@ -542,6 +542,19 @@ test(`units: ${UPDATE_UNIT} has the skills-sync ExecStartPost after units-sync, 
   );
 });
 
+test("scripts: sync-zapier-repo.sh is executable (mode 100755 in git)", () => {
+  const script = join(repoRoot, "scripts", "sync-zapier-repo.sh");
+  assert.ok(existsSync(script), "scripts/sync-zapier-repo.sh must exist");
+  // Same class as install-units.sh / install-skills.sh: bootstrap §5e and both
+  // update paths invoke it directly, so it must carry the exec bit in git.
+  chmodSync(script, 0o755);
+  assert.ok(
+    statSync(script).mode & 0o100,
+    "sync-zapier-repo.sh must be executable: bootstrap + ExecStartPost / SSM " +
+      "invoke it directly, and git must record mode 100755",
+  );
+});
+
 test("deploy.yml: update-agent SSM list installs skills before the bot restart (parity with the nightly)", () => {
   const commands = ssmCommands();
   const unitsIdx = commands.findIndex((c) => c.includes("install-units.sh"));

@@ -57,7 +57,10 @@
 # GH_APP_ID (gh-token.mjs), PI_BIN, INV_IMAGE, INV_USER,
 # PI_AGENT_DIR, PI_MODEL (per-run model override — issue #34; absent
 # when unset, which keeps the staged settings.json default),
-# AWS_REGION/AWS_DEFAULT_REGION, GA_PROPERTY_ID, ZAPIER_MCP_URL.
+# AWS_REGION/AWS_DEFAULT_REGION, GA_PROPERTY_ID, GITHUB_ALLOWED_REPOS
+# (gh-token.mjs mint allowlist — .env carries zapier; without this the
+# sandbox fell back to the 4-repo default and refused zapier mints,
+# 2026-11-12), ZAPIER_MCP_URL.
 # Slack tokens are structurally absent — investigate.ts never passes
 # them, and this script forwards only the list above.
 #
@@ -146,7 +149,7 @@ can_drop() {
 
 # Env the isolated child gets. Enumerated explicitly (not inherited) so the
 # listener's full env can never ride along, whatever invokes this script.
-PASSTHROUGH_ENV=(OPENROUTER_KEY_EAGLE OPENROUTER_KEY_PIZZA GH_APP_ID GA_PROPERTY_ID ZAPIER_MCP_URL PI_MODEL)
+PASSTHROUGH_ENV=(OPENROUTER_KEY_EAGLE OPENROUTER_KEY_PIZZA GH_APP_ID GITHUB_ALLOWED_REPOS GA_PROPERTY_ID ZAPIER_MCP_URL PI_MODEL)
 DROP_HOME="$INV_HOME"  # mode 2 overrides this with its staged HOME before run_dropped
 # Prints a SOURCEABLE env file ("export VAR=%q" lines) — NOT env(1)
 # arguments. The file is written per run and sourced inside the sudo'd
@@ -324,6 +327,7 @@ if command -v podman >/dev/null 2>&1 && can_drop && image_available; then
     -e OPENROUTER_KEY_EAGLE
     -e OPENROUTER_KEY_PIZZA
     -e GH_APP_ID
+    -e GITHUB_ALLOWED_REPOS
     -e GA_PROPERTY_ID
     -e ZAPIER_MCP_URL
     -e PI_MODEL

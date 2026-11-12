@@ -128,6 +128,15 @@ else
   rm -f /home/pizza-eagle/.config/ptp/twilio-readonly.json.tmp
 fi
 
+#### 5e. Zapier fleet harness checkout (/opt/ptp-zapier-workflows)
+# agent/AGENTS.md's "Zapier fleet changes" section promises the eagle
+# end-to-end zap ownership through the harness (validate/deploy/smoke in
+# this checkout). Provisioned here so a reborn box is born with it; kept
+# fresh by pizza-eagle-update.service's ExecStartPost (same script).
+# Idempotent: clones when missing, pulls --ff-only when present, never
+# touches a dirty tree (in-flight eagle changes live there).
+/opt/pizza-eagle/scripts/sync-zapier-repo.sh
+
 #### 6. Operator context + skills for the bot user
 install -d -o pizza-eagle -g pizza-eagle -m 755 /opt/pizza-eagle/state
 install -o pizza-eagle -g pizza-eagle -m 644 "$PTP_BOT_HOME/agent/AGENTS.md" \

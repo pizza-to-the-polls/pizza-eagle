@@ -297,6 +297,24 @@ test("gh-token: purpose mint needs no request-auth.json and grants issues only",
   assert.match(r.ledger, /feedflag/);
 });
 
+test("gh-token: zapier-fleet-sync purpose grants contents only, for the zapier repo", () => {
+  // The nightly/bootstrap /opt/ptp-zapier-workflows sync (2026-11-12): git
+  // fetch/push needs contents:write and NOTHING else — the sync can never
+  // file issues, open PRs, or merge.
+  const r = runHelper(["--repo", "pizza-to-the-polls/zapier", "--purpose", "zapier-fleet-sync"]);
+  assert.equal(r.code, 0, "purpose path mints without request-auth.json");
+  const mint = r.calls.find((c) => c.method === "POST");
+  assert.ok(mint, "mint POST present");
+  const body = JSON.parse(mint.body ?? "{}");
+  assert.deepEqual(body.repositories, ["zapier"], "scoped to the one repo");
+  assert.deepEqual(
+    body.permissions,
+    { contents: "write" },
+    "contents only — the sync may push/pull branches but never file, PR, or merge",
+  );
+  assert.match(r.ledger, /"requester":"timer:zapier-fleet-sync"/, "ledger names the timer");
+});
+
 test("gh-token: a purpose cannot be pointed at another repo", () => {
   const r = runHelper(["--repo", "pizza-to-the-polls/pizzabase", "--purpose", "feedflag-digest"], {
     auth: { requester: "U2ZLJ2KBP", writeAllowed: true },
