@@ -77,7 +77,15 @@ trap cleanup EXIT
 GH_TOKEN="$(node "$SCRIPTS_DIR/gh-token.mjs" --repo pizza-to-the-polls/zapier --purpose zapier-fleet-sync)" \
   || die "token mint failed (purpose zapier-fleet-sync)"
 B64="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64)"
-printf 'GIT_CONFIG_COUNT=1\nGIT_CONFIG_KEY_0=http.extraheader\nGIT_CONFIG_VALUE_0=AUTHORIZATION: basic %s\n' "$B64" > "$RUN_ENV"
+# NOTE: every line needs `export` (a sourced assignment is NOT exported — git
+# would never see the config) and the value needs single quotes (it contains
+# a space; an unquoted assignment splits into words and bash tries to run
+# the token as a command). Verified the hard way on the live box 2026-11-12.
+{
+  printf 'export GIT_CONFIG_COUNT=1\n'
+  printf 'export GIT_CONFIG_KEY_0=http.extraheader\n'
+  printf "export GIT_CONFIG_VALUE_0='AUTHORIZATION: basic %s'\n" "$B64"
+} > "$RUN_ENV"
 unset GH_TOKEN B64
 chown "$BOT_USER" "$RUN_ENV"
 
@@ -89,6 +97,11 @@ as_bot() {  # as_bot <bash-snippet> — runs with the auth env file sourced
 }
 
 # ── Clone or refresh ────────────────────────────────────────────────────────
+# /opt is root-owned (755) — the dropped clone below cannot mkdir into it, so
+# root pre-creates the target and hands ownership over BEFORE cloning (found
+# the hard way on the live box 2026-11-12: "could not create work tree dir").
+mkdir -p "$REPO_DIR"
+chown "$BOT_USER":"$BOT_USER" "$REPO_DIR" 2>/dev/null || true
 if [[ ! -d "$REPO_DIR/.git" ]]; then
   log "no checkout at $REPO_DIR — cloning"
   as_bot "git clone '$REPO_URL' '$REPO_DIR'" || die "clone failed"

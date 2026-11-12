@@ -671,3 +671,29 @@ test("install-skills.sh: installs new skills, no-ops on identical, re-installs o
   assert.doesNotMatch(r5.stdout, /updated:/, "subdir without SKILL.md must not be installed");
   assert.ok(!existsSync(join(targetDir, "empty-dir")), "subdir without SKILL.md must not appear in the target");
 });
+
+test("sync-zapier-repo.sh: git auth env file is export-quoted and the clone target is pre-created", () => {
+  // 2026-11-12 live-box incident pins (first provisioning run failed twice):
+  //   1. `GIT_CONFIG_VALUE_0=AUTHORIZATION: basic <b64>` sourced UNQUOTED and
+  //      UNEXPORTED — bash split it on the space and tried to run the token as
+  //      a command ("basic: command not found", token fragments in journald),
+  //      and even without the space git would never see an unexported var.
+  //   2. `git clone … /opt/ptp-zapier-workflows` as the bot user cannot mkdir
+  //      into root-owned /opt — root must pre-create + chown first.
+  const body = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "scripts", "sync-zapier-repo.sh"), "utf8");
+  // export + single-quoted value with the space-bearing scheme
+  assert.match(
+    body,
+    /export GIT_CONFIG_VALUE_0='AUTHORIZATION: basic %s'/,
+    "GIT_CONFIG_VALUE_0 must be written exported and single-quoted (space + subprocess visibility)",
+  );
+  assert.match(body, /export GIT_CONFIG_COUNT=1/, "GIT_CONFIG_COUNT must be exported, not just assigned");
+  assert.match(body, /export GIT_CONFIG_KEY_0=http\.extraheader/, "GIT_CONFIG_KEY_0 must be exported");
+  assert.doesNotMatch(body, /^GIT_CONFIG_/m, "no bare (unexported) GIT_CONFIG_ assignments");
+  // root pre-creates the clone target before the dropped clone
+  const mkdirIdx = body.indexOf('mkdir -p "$REPO_DIR"');
+  const cloneIdx = body.indexOf("git clone");
+  assert.ok(mkdirIdx !== -1 && cloneIdx !== -1 && mkdirIdx < cloneIdx, "root must mkdir -p the repo dir before the dropped clone");
+  // and never leaks a token into argv (issue #65 class)
+  assert.doesNotMatch(body, /git -c http\.extraheader/, "no `git -c http.extraheader` — token would ride argv into journald");
+});
