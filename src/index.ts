@@ -18,6 +18,7 @@ import { execFile } from "node:child_process";
 import { freemem, totalmem } from "node:os";
 import { join } from "node:path";
 import { appendUsage, withinDailyCap } from "./usage.js";
+import { appendCasebook } from "./casebook.js";
 import { evaluateSuspicion, WRITE_GATE } from "./suspicion.js";
 
 // File logs (bot.log) carry no journald timestamps — stamp our own.
@@ -349,6 +350,24 @@ async function main(): Promise<void> {
         outcome: "ok",
         model: cfg.piModel,
       });
+      // Casebook (fleet-dreaming phase 1): the content-bearing memory —
+      // question + verdict excerpt per completed case. usage.jsonl above
+      // stays metadata-only (anti-abuse); this shard feeds the dream-shift
+      // distiller and the per-run casebook.md digest. Raw `question`, not
+      // runQuestion (attachment @file refs would bloat the shard).
+      appendCasebook(cfg.stateDir, {
+        ts: new Date().toISOString(),
+        sessionId: record.sessionId,
+        threadTs,
+        channel: event.channel,
+        requester: event.user,
+        requesterName,
+        question,
+        answer,
+        outcome: "ok",
+        durationMs,
+        model: cfg.piModel,
+      });
       if (statusTs) {
         await editStatus(slack, event.channel, statusTs, ":white_check_mark: Investigation finished.");
       }
@@ -372,6 +391,23 @@ async function main(): Promise<void> {
         outcome: inv?.outcome ?? "error",
         model: cfg.piModel,
         errorTail: inv?.stderr?.length ? inv.stderr.slice(-200) : undefined,
+      });
+      // Casebook failure half: failures are pattern food too — recurring
+      // outcomes/timeouts are exactly what the dream shift hunts for.
+      // lastRequesterName from the record (the local may be out of scope
+      // if the run died before name resolution).
+      appendCasebook(cfg.stateDir, {
+        ts: new Date().toISOString(),
+        sessionId: record.sessionId,
+        threadTs,
+        channel: event.channel,
+        requester: event.user,
+        requesterName: record.lastRequesterName ?? undefined,
+        question,
+        errorTail: inv?.stderr?.length ? inv.stderr.slice(-200) : undefined,
+        outcome: inv?.outcome ?? "error",
+        durationMs: inv?.durationMs,
+        model: cfg.piModel,
       });
       const detail =
         e instanceof InvestigationError

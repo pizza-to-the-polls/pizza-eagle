@@ -29,6 +29,7 @@ import { spawn } from "node:child_process";
 import { appendFileSync, chmodSync, copyFileSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Config } from "./config.js";
+import { writeCasebookDigest } from "./casebook.js";
 
 export interface InvestigationResult {
   answer: string;
@@ -237,6 +238,13 @@ export async function runInvestigation(
   } catch {
     console.warn(`[pizza-eagle] no AGENTS.md in AGENT_DIR (${cfg.agentDir}) — running bare`);
   }
+
+  // Casebook digest (fleet-dreaming phase 1): the agent's only cross-case
+  // memory — recent questions + verdict excerpts. Listener-written here,
+  // like AGENTS.md above, because the isolation boundary blocks the
+  // worker from state/ (where the raw casebook shards live) entirely.
+  // Idempotent overwrite: every run (incl. retries) sees the latest tail.
+  writeCasebookDigest(cfg.stateDir, workdir);
 
   const started = Date.now();
   // The wrapper owns everything below this point: privilege drop, staging
