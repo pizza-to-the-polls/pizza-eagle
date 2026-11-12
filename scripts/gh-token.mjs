@@ -64,6 +64,13 @@ const DEFAULT_ALLOWED_REPOS = [
   "pizza-to-the-polls/polls.pizza",
   "pizza-to-the-polls/feedflag",
   "pizza-to-the-polls/hotnready",
+  // The Zapier fleet write gate (AGENTS.md "Zapier fleet changes", landed
+  // 2026-10-28): admin-asked zap changes are eagle-owned end-to-end — fixture
+  // first, harness validate/deploy/smoke, then commit+push. The App is
+  // installed on the repo (verified 2026-11-12, live mint). Before this entry
+  // the default silently refused zapier mints whenever GITHUB_ALLOWED_REPOS
+  // wasn't in the environment — exactly what the 2026-11-12 #dev run hit.
+  "pizza-to-the-polls/zapier",
 ];
 const ALLOWED_REPOS = (process.env.GITHUB_ALLOWED_REPOS ?? DEFAULT_ALLOWED_REPOS.join(","))
   .split(",")
@@ -97,6 +104,15 @@ export const PURPOSES = {
     repo: "pizza-to-the-polls/feedflag",
     permissions: { issues: "write" },
     requester: "timer:feedflag-digest",
+  },
+  // Nightly + bootstrap sync of /opt/ptp-zapier-workflows (the fleet harness
+  // checkout the eagle runs validate/deploy/smoke in). Fetch/push over HTTPS
+  // needs contents:write — no pull_requests, no issues: it can never file, PR,
+  // or merge anything.
+  "zapier-fleet-sync": {
+    repo: "pizza-to-the-polls/zapier",
+    permissions: { contents: "write" },
+    requester: "timer:zapier-fleet-sync",
   },
 };
 

@@ -210,20 +210,29 @@ ask in Slack; they never need to know the repo exists.
 
 ```bash
 cd /opt/ptp-zapier-workflows
-# git auth: mint a scoped token, use it for fetch + push (no stored creds):
+# git auth: mint a scoped token, export it as git config ENV (never argv —
+# `git -c http.extraheader=…` would put the token in argv → journald/session
+# transcripts; GIT_CONFIG_* env vars carry it invisibly). Works for fetch AND push:
 GH_TOKEN=$(node /opt/pizza-eagle/scripts/gh-token.mjs --repo pizza-to-the-polls/zapier)
-AUTH='http.extraheader=AUTHORIZATION: basic '$(printf 'x-access-token:%s' "$GH_TOKEN" | base64)
-git -c "$AUTH" pull --ff-only && git status --porcelain   # must be empty
+export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader
+export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64)"
+unset GH_TOKEN
+git pull --ff-only && git status --porcelain   # must be empty
 # 1. fixtures/<key>/NN-case.json — the failing case, first
 # 2. edit src/workflows/<key>.workflow.ts
 npm test                                  # tier-0, free
 npm run validate -- --only <key>          # safe fixtures as free draft runs — green or STOP
 npm run deploy -- <key>                    # publishes (parity + binding gates run inside)
 npm run smoke -- --only <key>              # fires a fixture at the REAL catch URL
-git add -A && git commit -m "<key>: <what + why>" && git -c "$AUTH" push
+git add -A && git commit -m "<key>: <what + why>" && git push   # auth rides the exported env
 ```
 
-`ZAPIER_MCP_URL` is already in your environment — the harness scripts read it.
+`ZAPIER_MCP_URL` and `GITHUB_ALLOWED_REPOS` are already in your environment —
+the harness scripts and gh-token.mjs read them. The checkout is refreshed
+nightly and your commit identity is preconfigured (repo-local config) —
+plain `git commit` works. If `/opt/ptp-zapier-workflows` is missing or a
+command claims it isn't on the mint allowlist, say so in the thread and
+stop: the box is degraded, don't improvise around it.
 Reply in the thread with: what changed, the published version, smoke result,
 and the commit link. **Larger or multi-workflow asks:** same routing rules as
 the other repos — split into one-workflow inline passes, or dispatch as an

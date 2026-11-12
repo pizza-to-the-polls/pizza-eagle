@@ -60,11 +60,16 @@ ExecStart=/usr/sbin/runuser -u pizza-eagle -- env HOME=/home/pizza-eagle /usr/bi
 # If pizza-eagle-update.service (this unit) itself changed mid-run, the current
 # run still uses the old definition; the next run picks the new one up — fine.
 ExecStartPost=/opt/pizza-eagle/scripts/install-units.sh
+ExecStartPost=/opt/pizza-eagle/scripts/install-skills.sh
 # Skills-sync (2026-11-02 issue): same bootstrap-only gap as the unit-sync
 # above — the pull may also have changed skills/<name>/SKILL.md, but
 # bootstrap.sh §6 installs skills only at provisioning time, so skill fixes
 # sat dormant on the box. install-skills.sh is add/update only (never
 # deletes a box-side skill absent from the repo) and needs no daemon-reload:
 # pi reads skills per session, so the restart below is all it takes.
-ExecStartPost=/opt/pizza-eagle/scripts/install-skills.sh
+# Zapier fleet harness freshness (2026-11-12): keep /opt/ptp-zapier-workflows
+# present + current so the eagle's AGENTS.md zap-flow always has a checkout.
+# Non-destructive by design: a dirty tree (in-flight eagle change between
+# edit and commit) is warned about and skipped, never reset.
+ExecStartPost=/opt/pizza-eagle/scripts/sync-zapier-repo.sh
 ExecStartPost=/bin/systemctl restart pizza-eagle.service

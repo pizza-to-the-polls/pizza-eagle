@@ -122,6 +122,11 @@ const WRAPPER_ENV_ALLOWLIST = [
   "GA_PROPERTY_ID", // ga.mjs default property
   "ZAPIER_MCP_URL", // zapier harness MCP endpoint
   "GH_APP_ID", // gh-token.mjs — the listener injects it from .env (its header)
+  "GITHUB_ALLOWED_REPOS", // gh-token.mjs mint allowlist — .env carries zapier; without
+  // this the sandbox fell back to the script's 4-repo default and refused
+  // pizza-to-the-polls/zapier mints (2026-11-12 #dev: Pizza Eagle reported
+  // "the token gate refuses the zapier repo" — the allowlist was widened in
+  // .env but never reached the dropped child)
 ];
 
 export function wrapperEnv(

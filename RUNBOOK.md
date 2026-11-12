@@ -34,6 +34,7 @@ One page. If Scott's unavailable, this keeps the bird flying.
 | Database access | `ptp_ro` role (SELECT-only) via RDS Data API |
 | Backups | `s3://pizza-eagle-backups/` — nightly tar, 180-day lifecycle |
 | Usage ledger | `state/usage.jsonl` on the box — every question, mint, publish |
+| Zapier fleet harness | `/opt/ptp-zapier-workflows` on the box — provisioned by bootstrap §5e, refreshed nightly by `sync-zapier-repo.sh` (ExecStartPost of pizza-eagle-update). Repair after breakage: `sudo /opt/pizza-eagle/scripts/sync-zapier-repo.sh` (idempotent; never resets a dirty tree — an in-flight eagle change lives there). |
 | pi model catalog | `/home/pizza-eagle/.pi/agent/models.json` on the box (NOT in this repo) |
 
 ## Model catalog (agent dir — re-provision by hand!)

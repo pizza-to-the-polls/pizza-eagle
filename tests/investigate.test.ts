@@ -424,6 +424,7 @@ test("wrapperEnv: explicit allowlist — Slack tokens are structurally absent", 
     OPENROUTER_KEY_PIZZA: "sk-or-pizza", // pi's model key (dev naming) — must pass
     GA_PROPERTY_ID: "123456", // ga.mjs default property — must pass
     ZAPIER_MCP_URL: "https://mcp.example", // zapier harness MCP — must pass
+    GITHUB_ALLOWED_REPOS: "pizza-to-the-polls/zapier", // gh-token.mjs mint allowlist — must pass
     GH_APP_ID: "123456", // gh-token.mjs — must pass
     PI_MODEL: "or-pizza/env-direct", // issue #34: NOT an allowlist key — rides only via cfg.piModel
   };
@@ -436,6 +437,7 @@ test("wrapperEnv: explicit allowlist — Slack tokens are structurally absent", 
   assert.equal(out.GH_APP_ID, "123456", "GH app id passes (gh-token.mjs)");
   assert.equal(out.GA_PROPERTY_ID, "123456", "GA property passes");
   assert.equal(out.ZAPIER_MCP_URL, "https://mcp.example", "zapier MCP endpoint passes");
+  assert.equal(out.GITHUB_ALLOWED_REPOS, "pizza-to-the-polls/zapier", "mint allowlist passes (zapier write path)");
   assert.equal(out.PI_MODEL, undefined, "PI_MODEL never rides the raw env — cfg.piModel is its only source (issue #34)");
   assert.equal(out.PATH, "/usr/bin:/bin");
   assert.equal(out.HOME, "/home/pizza-eagle");
