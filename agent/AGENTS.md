@@ -215,7 +215,7 @@ cd /opt/ptp-zapier-workflows
 # transcripts; GIT_CONFIG_* env vars carry it invisibly). Works for fetch AND push:
 GH_TOKEN=$(node /opt/pizza-eagle/scripts/gh-token.mjs --repo pizza-to-the-polls/zapier)
 export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraheader
-export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64)"
+export GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
 unset GH_TOKEN
 git pull --ff-only && git status --porcelain   # must be empty
 # 1. fixtures/<key>/NN-case.json — the failing case, first
