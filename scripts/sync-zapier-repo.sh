@@ -76,7 +76,7 @@ trap cleanup EXIT
 
 GH_TOKEN="$(node "$SCRIPTS_DIR/gh-token.mjs" --repo pizza-to-the-polls/zapier --purpose zapier-fleet-sync)" \
   || die "token mint failed (purpose zapier-fleet-sync)"
-B64="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64)"
+B64="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 | tr -d '\n')"
 # NOTE: every line needs `export` (a sourced assignment is NOT exported — git
 # would never see the config) and the value needs single quotes (it contains
 # a space; an unquoted assignment splits into words and bash tries to run

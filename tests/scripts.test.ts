@@ -687,6 +687,10 @@ test("sync-zapier-repo.sh: git auth env file is export-quoted and the clone targ
     /export GIT_CONFIG_VALUE_0='AUTHORIZATION: basic %s'/,
     "GIT_CONFIG_VALUE_0 must be written exported and single-quoted (space + subprocess visibility)",
   );
+  // 2026-11-12 live-box round 2: GNU coreutils base64 WRAPS at 76 cols — a
+  // wrapped header value embeds newlines and libcurl rejects it ("A libcurl
+  // function was given a bad argument"). The newline strip is load-bearing.
+  assert.match(body, /base64 \| tr -d ['"]\\n['"]/, "b64 must be newline-stripped (GNU base64 wraps at 76 cols)");
   assert.match(body, /export GIT_CONFIG_COUNT=1/, "GIT_CONFIG_COUNT must be exported, not just assigned");
   assert.match(body, /export GIT_CONFIG_KEY_0=http\.extraheader/, "GIT_CONFIG_KEY_0 must be exported");
   assert.doesNotMatch(body, /^GIT_CONFIG_/m, "no bare (unexported) GIT_CONFIG_ assignments");
